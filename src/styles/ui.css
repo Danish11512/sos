@@ -6,6 +6,7 @@
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     Helvetica, Arial, sans-serif;
   user-select: none;
+  font-size: 13px;
 }
 
 /* ===== Shared ===== */
@@ -23,7 +24,8 @@
   display: flex;
   flex-direction: column;
   gap: 0;
-  width: 280px;
+  width: 300px;
+  max-height: 80vh;
   background: #fff;
   border-radius: 12px;
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
@@ -44,6 +46,7 @@
   background: #0a66c2;
   color: #fff;
   cursor: default;
+  flex-shrink: 0;
 }
 
 .sos-site-name {
@@ -73,16 +76,32 @@
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.6);
 }
 
-/* States */
+/* States — idle (grey/needs config) */
 .sos-toggle-btn--idle {
+  background: #e0e0e0;
+  color: #999;
+  cursor: not-allowed;
+}
+
+.sos-toggle-dot--idle {
+  background: #bbb;
+}
+
+/* States — ready (green, all required fields set) */
+.sos-toggle-btn--ready {
+  background: #1e8e3e;
+  color: #fff;
+}
+
+.sos-toggle-btn--ready:hover {
+  background: #166b2f;
+}
+
+.sos-toggle-dot--ready {
   background: #fff;
-  color: #0a66c2;
 }
 
-.sos-toggle-btn--idle:hover {
-  background: #e8f0fe;
-}
-
+/* States — running (red pulse) */
 .sos-toggle-btn--running {
   background: #d93025;
   color: #fff;
@@ -92,27 +111,16 @@
   background: #b71c1c;
 }
 
+.sos-toggle-dot--running {
+  background: #fff;
+  animation: sos-pulse 1.2s ease-in-out infinite;
+}
+
+/* States — done (solid green) */
 .sos-toggle-btn--done {
   background: #1e8e3e;
   color: #fff;
   cursor: default;
-}
-
-/* The dot indicator inside the toggle button */
-.sos-toggle-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-}
-
-.sos-toggle-dot--idle {
-  background: #0a66c2;
-}
-
-.sos-toggle-dot--running {
-  background: #fff;
-  animation: sos-pulse 1.2s ease-in-out infinite;
 }
 
 .sos-toggle-dot--done {
@@ -124,37 +132,167 @@
   50% { opacity: 0.4; }
 }
 
-/* ===== Settings panel ===== */
+/* ===== Settings panel (scrollable) ===== */
 .sos-panel {
-  padding: 14px 16px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: calc(80vh - 52px);
   background: #fff;
-  border-bottom-left-radius: 12px;
-  border-bottom-right-radius: 12px;
 }
 
-.sos-panel-label {
-  font-size: 11px;
+/* ===== Accordion sections ===== */
+.sos-section {
+  border-bottom: 1px solid #eee;
+}
+
+.sos-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  cursor: pointer;
+  background: #fafafa;
+  transition: background 0.15s ease;
+}
+
+.sos-section-header:hover {
+  background: #f0f0f0;
+}
+
+.sos-section-title {
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.6px;
-  color: #666;
-  margin-bottom: 8px;
+  letter-spacing: 0.4px;
+  color: #444;
 }
 
-.sos-panel-input {
+.sos-section-arrow {
+  font-size: 10px;
+  color: #999;
+  transition: transform 0.2s ease;
+}
+
+.sos-section-open .sos-section-arrow {
+  transform: rotate(0deg);
+}
+
+/* Highlight animation for the personal section when user clicks Start without settings */
+.sos-section-highlight {
+  animation: sos-glow 2s ease;
+}
+
+@keyframes sos-glow {
+  0%, 100% { background: inherit; }
+  30% { background: #fff3cd; }
+  60% { background: #fff8e1; }
+}
+
+/* ===== Section body ===== */
+.sos-section-body {
+  padding: 8px 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sos-section-body label,
+.sos-label-sub {
+  font-size: 11px;
+  font-weight: 500;
+  color: #555;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.sos-label-toggle {
+  flex-direction: row !important;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+.sos-label-toggle span {
+  font-size: 11px;
+  font-weight: 500;
+  color: #555;
+}
+
+.sos-hint {
+  font-weight: 400;
+  color: #999;
+  font-size: 10px;
+}
+
+/* ---- Form fields ---- */
+.sos-fld {
   width: 100%;
-  padding: 8px 10px;
-  border: 1px solid #ccc;
-  border-radius: 8px;
-  font-size: 13px;
+  padding: 7px 9px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 12px;
   font-family: inherit;
   outline: none;
   box-sizing: border-box;
   transition: border-color 0.2s ease;
+  color: #333;
+  background: #fff;
 }
 
-.sos-panel-input:focus {
+.sos-fld:focus {
   border-color: #0a66c2;
+}
+
+.sos-fld::placeholder {
+  color: #bbb;
+}
+
+.sos-toggle-input {
+  width: 16px !important;
+  height: 16px;
+  cursor: pointer;
+  accent-color: #0a66c2;
+  flex-shrink: 0;
+}
+
+select.sos-fld {
+  appearance: auto;
+  cursor: pointer;
+}
+
+.sos-textarea {
+  min-height: 60px;
+  resize: vertical;
+  line-height: 1.4;
+}
+
+/* ===== Footer with Save button ===== */
+.sos-section-footer {
+  padding: 10px 16px;
+  display: flex;
+  justify-content: flex-end;
+  background: #fafafa;
+  border-top: 1px solid #eee;
+  position: sticky;
+  bottom: 0;
+}
+
+.sos-save-btn {
+  padding: 6px 18px;
+  background: #0a66c2;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.sos-save-btn:hover {
+  background: #084e91;
 }
 
 /* ===== Collapsed badge ===== */
@@ -183,4 +321,115 @@
   opacity: 0;
   pointer-events: none;
   transform: scale(0.85);
+}
+
+/* ===== Tag Input (Search Terms) ===== */
+.sos-tag-input-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sos-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  min-height: 28px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.sos-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  background: #e8f0fe;
+  color: #0a66c2;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.sos-tag-text {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sos-tag-remove {
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  color: #0a66c2;
+  opacity: 0.6;
+  transition: opacity 0.15s ease;
+}
+
+.sos-tag-remove:hover {
+  opacity: 1;
+}
+
+.sos-tag-text-input {
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 12px;
+  padding: 6px 8px;
+  outline: none;
+  font-family: inherit;
+  transition: border-color 0.2s ease;
+}
+
+.sos-tag-text-input:focus {
+  border-color: #0a66c2;
+}
+
+.sos-tag-text-input::placeholder {
+  color: #bbb;
+}
+
+/* ===== Custom Answers textarea ===== */
+.sos-custom-answers-input {
+  min-height: 80px;
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 11px;
+}
+
+/* ===== Resume Upload ===== */
+.sos-resume-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sos-resume-input {
+  font-size: 11px;
+  padding: 4px 0;
+}
+
+.sos-resume-filename {
+  font-size: 11px;
+  color: #0a66c2;
+  font-weight: 500;
+}
+
+/* ===== Separator ===== */
+.sos-separator {
+  border: none;
+  border-top: 1px solid #e0e0e0;
+  margin: 6px 0;
+}
+
+/* ===== Label sub-title ===== */
+.sos-label-sub {
+  font-size: 11px;
+  font-weight: 500;
+  color: #555;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
