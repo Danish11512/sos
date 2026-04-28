@@ -11,11 +11,20 @@ function handleSiteDetected(presetId: string): void {
   // Destroy previous widget if any (e.g. navigating between sites)
   widget?.destroy()
 
-  // Show the mini floating UI with the site name
-  widget = new FloatingWidget({ siteName: preset.name })
+  // Show the new two-piece UI with toggle + settings panel
+  widget = new FloatingWidget({
+    siteName: preset.name,
+    onToggle: (active) => {
+      if (active) {
+        console.log(`[SOS] Pipeline started for ${preset.name}`)
+        runApplyPipeline(preset)
+      } else {
+        console.log(`[SOS] Pipeline stopped for ${preset.name}`)
+        // Stop logic to be wired up later
+      }
+    },
+  })
   console.log(`[SOS] Widget shown for ${preset.name}`)
-
-  runApplyPipeline(preset)
 }
 
 async function runApplyPipeline(preset: SitePreset): Promise<void> {
