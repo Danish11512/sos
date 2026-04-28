@@ -1,9 +1,19 @@
 import { sitePresets } from "../config/sites"
 import type { SitePreset } from "../types/site"
+import { FloatingWidget } from "../utils/ui"
+
+let widget: FloatingWidget | null = null
 
 function handleSiteDetected(presetId: string): void {
   const preset = sitePresets.find((p) => p.id === presetId)
   if (!preset) return
+
+  // Destroy previous widget if any (e.g. navigating between sites)
+  widget?.destroy()
+
+  // Show the mini floating UI with the site name
+  widget = new FloatingWidget({ siteName: preset.name })
+  console.log(`[SOS] Widget shown for ${preset.name}`)
 
   runApplyPipeline(preset)
 }
