@@ -1,0 +1,186 @@
+:host {
+  all: initial;
+  display: block;
+  position: fixed;
+  z-index: 2147483647;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  user-select: none;
+}
+
+/* ===== Shared ===== */
+.hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.85);
+}
+
+/* ===== Expanded container ===== */
+.sos-expanded {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: 280px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+  transition: opacity 0.2s ease, transform 0.25s ease;
+}
+
+.sos-expanded.hidden {
+  transform: translateX(40px) scale(0.85);
+}
+
+/* ===== Header row: title + toggle button ===== */
+.sos-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #0a66c2;
+  color: #fff;
+  cursor: default;
+}
+
+.sos-site-name {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+/* ---- Toggle button ---- */
+.sos-toggle-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: none;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+  outline: none;
+}
+
+.sos-toggle-btn:focus-visible {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.6);
+}
+
+/* States */
+.sos-toggle-btn--idle {
+  background: #fff;
+  color: #0a66c2;
+}
+
+.sos-toggle-btn--idle:hover {
+  background: #e8f0fe;
+}
+
+.sos-toggle-btn--running {
+  background: #d93025;
+  color: #fff;
+}
+
+.sos-toggle-btn--running:hover {
+  background: #b71c1c;
+}
+
+.sos-toggle-btn--done {
+  background: #1e8e3e;
+  color: #fff;
+  cursor: default;
+}
+
+/* The dot indicator inside the toggle button */
+.sos-toggle-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.sos-toggle-dot--idle {
+  background: #0a66c2;
+}
+
+.sos-toggle-dot--running {
+  background: #fff;
+  animation: sos-pulse 1.2s ease-in-out infinite;
+}
+
+.sos-toggle-dot--done {
+  background: #fff;
+}
+
+@keyframes sos-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ===== Settings panel ===== */
+.sos-panel {
+  padding: 14px 16px;
+  background: #fff;
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+
+.sos-panel-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.sos-panel-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease;
+}
+
+.sos-panel-input:focus {
+  border-color: #0a66c2;
+}
+
+/* ===== Collapsed badge ===== */
+.sos-collapsed {
+  position: fixed;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  padding: 6px 10px;
+  background: #0a66c2;
+  color: #fff;
+  border-radius: 6px 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+  transition: opacity 0.2s ease, transform 0.25s ease;
+  writing-mode: vertical-lr;
+  text-orientation: mixed;
+  padding: 10px 5px;
+}
+
+.sos-collapsed.hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.85);
+}
