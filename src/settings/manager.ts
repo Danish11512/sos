@@ -160,7 +160,6 @@ export class SettingsManager {
     const filterTextFields: [string, string][] = [
       ["sortBy", "Sort By"],
       ["datePosted", "Date Posted"],
-      ["salary", "Salary"],
     ]
     for (const [field, label] of filterTextFields) {
       if (!(f as unknown as Record<string, string>)[field]?.toString().trim()) {
@@ -170,16 +169,7 @@ export class SettingsManager {
     // companies is EXEMPT
     // All checkbox/toggle/checkbox-group fields are EXEMPT
 
-    // Bad word text fields — mandatory per user request (everything not explicitly exempted)
-    if (!(f as unknown as Record<string, string>).aboutCompanyBadWords?.trim()) {
-      missing.push({ section: "filters", field: "aboutCompanyBadWords", label: "Bad Words – Company About" })
-    }
-    if (!(f as unknown as Record<string, string>).aboutCompanyGoodWords?.trim()) {
-      missing.push({ section: "filters", field: "aboutCompanyGoodWords", label: "Good Words – Company About" })
-    }
-    if (!(f as unknown as Record<string, string>).badWords?.trim()) {
-      missing.push({ section: "filters", field: "badWords", label: "Bad Words – Job Description" })
-    }
+    // Bad word fields are optional
     // currentExperience — number; empty/NaN is missing
     const curExp = (f as unknown as Record<string, unknown>).currentExperience
     if (curExp == null || (typeof curExp === "number" && isNaN(curExp)) || String(curExp).trim() === "") {
@@ -195,7 +185,7 @@ export class SettingsManager {
       ["linkedIn", "LinkedIn URL"],
       ["usCitizenship", "US Citizenship"],
       ["desiredSalary", "Desired Salary"],
-      ["linkedinHeadline", "LinkedIn Headline"],
+      
     ]
     for (const [field, label] of answerMandatory) {
       const val = (a as unknown as Record<string, unknown>)[field]

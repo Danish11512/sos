@@ -41,7 +41,11 @@ async function handleSiteDetected(presetId: string): Promise<void> {
 
 async function runApplyPipeline(preset: SitePreset): Promise<void> {
   console.log(`[SOS] Starting apply pipeline for ${preset.name}`)
-  // Pipeline orchestration will be implemented per feature
+
+  if (preset.id === "linkedin") {
+    window.location.href = "https://www.linkedin.com/jobs/apply/"
+    return
+  }
 }
 
 export default defineContentScript({

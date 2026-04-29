@@ -251,20 +251,7 @@ export class FloatingWidget {
               <option value="Past 24 hours">Past 24 hours</option>
             </select>
           </label>
-          <label>Salary
-            <select class="sos-fld" data-path="site.filters.salary">
-              <option value="">—</option>
-              <option value="40000">$40,000+</option>
-              <option value="60000">$60,000+</option>
-              <option value="80000">$80,000+</option>
-              <option value="100000">$100,000+</option>
-              <option value="120000">$120,000+</option>
-              <option value="140000">$140,000+</option>
-              <option value="160000">$160,000+</option>
-              <option value="180000">$180,000+</option>
-              <option value="200000">$200,000+</option>
-            </select>
-          </label>
+          
           <div class="sos-label-sub">Experience Level</div>
           <div class="sos-checkbox-group" data-checkbox-group="site.filters.experienceLevel">
             <label class="sos-label-chk"><input type="checkbox" value="Internship"> Internship</label>
@@ -325,9 +312,6 @@ export class FloatingWidget {
           <div class="sos-label-sub">Skip: Bad Words in Job Description <span class="sos-hint">(comma-separated)</span></div>
           <input class="sos-fld" data-path="site.filters.badWords" type="text" placeholder="US Citizen, No C2C, ...">
           <hr class="sos-separator">
-          <label>Current Experience (years)
-            <input class="sos-fld" data-path="site.filters.currentExperience" type="number" min="-1" placeholder="-1 (apply to all)">
-          </label>
           <label class="sos-label-toggle">
             <span>Security Clearance</span>
             <input class="sos-fld sos-toggle-input" data-path="site.filters.securityClearance" type="checkbox">
@@ -346,6 +330,20 @@ export class FloatingWidget {
         </div>
         <div class="sos-section-body hidden">
           <label>Years of Experience<input class="sos-fld" data-path="site.answers.yearsOfExperience" type="text" placeholder="5"></label>
+          <label>Desired Salary *
+            <select class="sos-fld" data-path="site.answers.desiredSalary">
+              <option value="">—</option>
+              <option value="40000">$40,000+</option>
+              <option value="60000">$60,000+</option>
+              <option value="80000">$80,000+</option>
+              <option value="100000">$100,000+</option>
+              <option value="120000">$120,000+</option>
+              <option value="140000">$140,000+</option>
+              <option value="160000">$160,000+</option>
+              <option value="180000">$180,000+</option>
+              <option value="200000">$200,000+</option>
+            </select>
+          </label>
           <label>Require Visa
             <select class="sos-fld" data-path="site.answers.requireVisa">
               <option value="No">No</option>
@@ -407,8 +405,8 @@ export class FloatingWidget {
           <label class="sos-label-toggle"><span>Auto-fill Screening Questions</span><input class="sos-fld sos-toggle-input" data-path="site.additional.autoFillScreeningQuestions" type="checkbox"></label>
           <div class="sos-label-sub">Resume Upload <span class="sos-hint">(.pdf, .doc, .docx, .txt)</span></div>
           <div class="sos-resume-upload">
-            <input class="sos-fld sos-resume-input" data-path="site.additional.resumeData" type="file" accept=".pdf,.doc,.docx,.txt,application/pdf,application/msword,text/plain">
-            <span class="sos-resume-filename" data-path="site.additional.resumeFileName"></span>
+            <input class="sos-resume-input" type="file" accept=".pdf,.doc,.docx,.txt,application/pdf,application/msword,text/plain">
+            <span class="sos-resume-filename"></span>
           </div>
           <div class="sos-label-sub">Custom Answers <span class="sos-hint">(question,answer per line)</span></div>
           <textarea class="sos-fld sos-textarea sos-custom-answers-input" data-path="site.additional.customAnswers" placeholder="What is your desired salary?,120000&#10;Are you authorized to work in the US?,Yes"></textarea>
@@ -625,12 +623,13 @@ export class FloatingWidget {
       })
     })
 
-    // Sync all data-path fields
+    // Sync all data-path fields (skip file inputs — set by FileReader, not programmatically)
     this.formContainer
       .querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
         "[data-path]:not([data-tag-container])"
       )
       .forEach((el) => {
+        if (el.tagName === "INPUT" && (el as HTMLInputElement).type === "file") return
         const path = el.getAttribute("data-path")!
         const val = this.getValueByPath(path)
         this.setFieldValue(el, val, path)
@@ -747,12 +746,13 @@ export class FloatingWidget {
     })
 
 
-    // Gather all data-path fields
+    // Gather all data-path fields (skip file inputs — handled separately)
     this.formContainer
       .querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
         "[data-path]:not([data-tag-container])"
       )
       .forEach((el) => {
+        if (el.tagName === "INPUT" && (el as HTMLInputElement).type === "file") return
         const path = el.getAttribute("data-path")!
         // CustomAnswers — parse CSV from textarea
         if (path.endsWith("customAnswers")) {
@@ -799,6 +799,7 @@ export class FloatingWidget {
 
   private handleClickOutside(e: MouseEvent): void {
     if (this.expandedEl.classList.contains("hidden")) return
+    if (this.state === "running") return
     if (!this.container.contains(e.target as Node)) this.collapse()
   }
 
