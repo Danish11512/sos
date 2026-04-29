@@ -4,7 +4,7 @@ import { sitePresets } from "../config/sites"
 import type { SitePreset } from "../types/site"
 import { FloatingWidget } from "../utils/ui"
 import { loadSettings } from "../utils/storage"
-import { areSiteSettingsReady } from "../types/settings"
+import { areSiteSettingsReady } from "../settings/manager"
 import type { WidgetState } from "../types/ui"
 
 let widget: FloatingWidget | null = null
@@ -33,7 +33,6 @@ async function handleSiteDetected(presetId: string): Promise<void> {
         runApplyPipeline(preset)
       } else {
         console.log(`[SOS] Pipeline stopped for ${preset.name}`)
-        // Stop logic to be wired up later
       }
     },
   })

@@ -1,14 +1,12 @@
 import type { FloatingWidgetOptions, WidgetState } from "../types/ui"
-import type {
-  AppSettings,
-  GlobalSettings,
-  SiteSettings,
-} from "../types/settings"
-import { areSiteSettingsReady, DEFAULT_APP_SETTINGS } from "../types/settings"
-import { DEFAULT_FILTERS } from "../settings/filters"
-import { DEFAULT_ANSWERS } from "../settings/answers"
-import { DEFAULT_PIPELINE } from "../settings/pipeline"
-import { DEFAULT_ADDITIONAL } from "../settings/additional"
+import type { AppSettings, GlobalSettings, SiteSettings } from "../settings/sections"
+import { areSiteSettingsReady } from "../settings/manager"
+import {
+  DEFAULT_FILTERS,
+  DEFAULT_ANSWERS,
+  DEFAULT_PIPELINE,
+  DEFAULT_ADDITIONAL,
+} from "../settings/sections"
 import { loadSettings, saveSettings } from "./storage"
 import css from "../styles/ui.css?raw"
 
@@ -168,11 +166,11 @@ export class FloatingWidget {
           <label>First Name *<input class="sos-fld" data-path="global.personal.firstName" type="text" placeholder="John"></label>
           <label>Last Name *<input class="sos-fld" data-path="global.personal.lastName" type="text" placeholder="Doe"></label>
           <label>Phone *<input class="sos-fld" data-path="global.personal.phoneNumber" type="tel" placeholder="9876543210"></label>
-          <label>Current City<input class="sos-fld" data-path="global.personal.currentCity" type="text" placeholder="Los Angeles"></label>
-          <label>Street<input class="sos-fld" data-path="global.personal.street" type="text" placeholder="123 Main St"></label>
-          <label>State<input class="sos-fld" data-path="global.personal.state" type="text" placeholder="CA"></label>
-          <label>Zip Code<input class="sos-fld" data-path="global.personal.zipcode" type="text" placeholder="12345"></label>
-          <label>Country<input class="sos-fld" data-path="global.personal.country" type="text" placeholder="United States"></label>
+          <label>Current City *<input class="sos-fld" data-path="global.personal.currentCity" type="text" placeholder="Los Angeles"></label>
+          <label>Street *<input class="sos-fld" data-path="global.personal.street" type="text" placeholder="123 Main St"></label>
+          <label>State *<input class="sos-fld" data-path="global.personal.state" type="text" placeholder="CA"></label>
+          <label>Zip Code *<input class="sos-fld" data-path="global.personal.zipcode" type="text" placeholder="12345"></label>
+          <label>Country *<input class="sos-fld" data-path="global.personal.country" type="text" placeholder="United States"></label>
         </div>
       </div>
 
@@ -250,42 +248,49 @@ export class FloatingWidget {
           <label>Salary
             <select class="sos-fld" data-path="site.filters.salary">
               <option value="">—</option>
-              <option value="$40,000+">$40,000+</option>
-              <option value="$60,000+">$60,000+</option>
-              <option value="$80,000+">$80,000+</option>
-              <option value="$100,000+">$100,000+</option>
-              <option value="$120,000+">$120,000+</option>
-              <option value="$140,000+">$140,000+</option>
-              <option value="$160,000+">$160,000+</option>
-              <option value="$180,000+">$180,000+</option>
-              <option value="$200,000+">$200,000+</option>
+              <option value="40000">$40,000+</option>
+              <option value="60000">$60,000+</option>
+              <option value="80000">$80,000+</option>
+              <option value="100000">$100,000+</option>
+              <option value="120000">$120,000+</option>
+              <option value="140000">$140,000+</option>
+              <option value="160000">$160,000+</option>
+              <option value="180000">$180,000+</option>
+              <option value="200000">$200,000+</option>
             </select>
           </label>
+          <div class="sos-label-sub">Experience Level</div>
+          <div class="sos-checkbox-group" data-checkbox-group="site.filters.experienceLevel">
+            <label class="sos-label-chk"><input type="checkbox" value="Internship"> Internship</label>
+            <label class="sos-label-chk"><input type="checkbox" value="Entry level"> Entry level</label>
+            <label class="sos-label-chk"><input type="checkbox" value="Associate"> Associate</label>
+            <label class="sos-label-chk"><input type="checkbox" value="Mid-Senior level"> Mid-Senior level</label>
+            <label class="sos-label-chk"><input type="checkbox" value="Director"> Director</label>
+            <label class="sos-label-chk"><input type="checkbox" value="Executive"> Executive</label>
+          </div>
+          <div class="sos-label-sub">Job Type</div>
+          <div class="sos-checkbox-group" data-checkbox-group="site.filters.jobType">
+            <label class="sos-label-chk"><input type="checkbox" value="Full-time"> Full-time</label>
+            <label class="sos-label-chk"><input type="checkbox" value="Part-time"> Part-time</label>
+            <label class="sos-label-chk"><input type="checkbox" value="Contract"> Contract</label>
+            <label class="sos-label-chk"><input type="checkbox" value="Temporary"> Temporary</label>
+            <label class="sos-label-chk"><input type="checkbox" value="Volunteer"> Volunteer</label>
+            <label class="sos-label-chk"><input type="checkbox" value="Internship"> Internship</label>
+            <label class="sos-label-chk"><input type="checkbox" value="Other"> Other</label>
+          </div>
+          <div class="sos-label-sub">On-site / Remote</div>
+          <div class="sos-checkbox-group" data-checkbox-group="site.filters.onSite">
+            <label class="sos-label-chk"><input type="checkbox" value="On-site"> On-site</label>
+            <label class="sos-label-chk"><input type="checkbox" value="Remote"> Remote</label>
+            <label class="sos-label-chk"><input type="checkbox" value="Hybrid"> Hybrid</label>
+          </div>
+          <div class="sos-label-sub">Companies <span class="sos-hint">(comma-separated)</span></div>
+          <input class="sos-fld" data-path="site.filters.companies" type="text" placeholder="Google, Meta, Apple, ...">
+          <label>Switch #<input class="sos-fld" data-path="site.search.switchNumber" type="number" min="1" placeholder="30"></label>
           <label class="sos-label-toggle">
             <span>Easy Apply Only</span>
             <input class="sos-fld sos-toggle-input" data-path="site.filters.easyApplyOnly" type="checkbox">
           </label>
-          <div class="sos-label-sub">Experience Level <span class="sos-hint">(comma-separated)</span></div>
-          <input class="sos-fld" data-path="site.filters.experienceLevel" type="text" placeholder="Internship, Entry level, Associate, ...">
-          <div class="sos-label-sub">Job Type <span class="sos-hint">(comma-separated)</span></div>
-          <input class="sos-fld" data-path="site.filters.jobType" type="text" placeholder="Full-time, Contract, ...">
-          <div class="sos-label-sub">On-site / Remote <span class="sos-hint">(comma-separated)</span></div>
-          <input class="sos-fld" data-path="site.filters.onSite" type="text" placeholder="On-site, Remote, Hybrid">
-          <div class="sos-label-sub">Companies <span class="sos-hint">(comma-separated)</span></div>
-          <input class="sos-fld" data-path="site.filters.companies" type="text" placeholder="Google, Meta, Apple, ...">
-          <div class="sos-label-sub">Location <span class="sos-hint">(comma-separated)</span></div>
-          <input class="sos-fld" data-path="site.filters.location" type="text" placeholder="United States, Remote, ...">
-          <div class="sos-label-sub">Industry <span class="sos-hint">(comma-separated)</span></div>
-          <input class="sos-fld" data-path="site.filters.industry" type="text" placeholder="Technology, Finance, ...">
-          <div class="sos-label-sub">Job Function <span class="sos-hint">(comma-separated)</span></div>
-          <input class="sos-fld" data-path="site.filters.jobFunction" type="text" placeholder="Engineering, Product, ...">
-          <div class="sos-label-sub">Job Titles <span class="sos-hint">(comma-separated)</span></div>
-          <input class="sos-fld" data-path="site.filters.jobTitles" type="text" placeholder="Software Engineer, ...">
-          <div class="sos-label-sub">Benefits <span class="sos-hint">(comma-separated)</span></div>
-          <input class="sos-fld" data-path="site.filters.benefits" type="text" placeholder="401k, Health Insurance, ...">
-          <div class="sos-label-sub">Commitments <span class="sos-hint">(comma-separated)</span></div>
-          <input class="sos-fld" data-path="site.filters.commitments" type="text" placeholder="Full-time, Contract, ...">
-          <label>Switch #<input class="sos-fld" data-path="site.search.switchNumber" type="number" min="1" placeholder="30"></label>
           <label class="sos-label-toggle">
             <span>Randomize Search Order</span>
             <input class="sos-fld sos-toggle-input" data-path="site.search.randomizeSearchOrder" type="checkbox">
@@ -354,7 +359,6 @@ export class FloatingWidget {
               <option value="Other">Other</option>
             </select>
           </label>
-          <label>Desired Salary<input class="sos-fld" data-path="site.answers.desiredSalary" type="number" placeholder="120000"></label>
           <label>Current CTC<input class="sos-fld" data-path="site.answers.currentCtc" type="number" placeholder="80000"></label>
           <label>Notice Period (days)<input class="sos-fld" data-path="site.answers.noticePeriod" type="number" min="0" placeholder="30"></label>
           <label>LinkedIn Headline<input class="sos-fld" data-path="site.answers.linkedinHeadline" type="text" placeholder="Software Engineer @ Google..."></label>
@@ -367,10 +371,14 @@ export class FloatingWidget {
 
       <div class="sos-section">
         <div class="sos-section-header" data-section="pipeline">
-          <span class="sos-section-title">Pipeline Controls</span>
+          <span class="sos-section-title">Pipeline & Behavior</span>
           <span class="sos-section-arrow">▶</span>
         </div>
         <div class="sos-section-body hidden">
+          <label>Click Gap (sec)<input class="sos-fld" data-path="global.globalBehavior.clickGap" type="number" min="0" step="0.5" placeholder="1"></label>
+          <label class="sos-label-toggle"><span>Smooth Scroll</span><input class="sos-fld sos-toggle-input" data-path="global.globalBehavior.smoothScroll" type="checkbox"></label>
+          <label class="sos-label-toggle"><span>Keep Screen Awake</span><input class="sos-fld sos-toggle-input" data-path="global.globalBehavior.keepScreenAwake" type="checkbox"></label>
+          <hr class="sos-separator">
           <label class="sos-label-toggle"><span>Pause Before Submit</span><input class="sos-fld sos-toggle-input" data-path="site.pipeline.pauseBeforeSubmit" type="checkbox"></label>
           <label class="sos-label-toggle"><span>Pause on Unknown Questions</span><input class="sos-fld sos-toggle-input" data-path="site.pipeline.pauseAtFailedQuestion" type="checkbox"></label>
           <label class="sos-label-toggle"><span>Overwrite Previous Answers</span><input class="sos-fld sos-toggle-input" data-path="site.pipeline.overwritePreviousAnswers" type="checkbox"></label>
@@ -381,19 +389,6 @@ export class FloatingWidget {
           <label class="sos-label-toggle"><span>Alternate Sort By</span><input class="sos-fld sos-toggle-input" data-path="site.pipeline.alternateSortby" type="checkbox"></label>
           <label class="sos-label-toggle"><span>Cycle Date Posted</span><input class="sos-fld sos-toggle-input" data-path="site.pipeline.cycleDatePosted" type="checkbox"></label>
           <label class="sos-label-toggle"><span>Stop Date Cycle at 24h</span><input class="sos-fld sos-toggle-input" data-path="site.pipeline.stopDateCycleAt24hr" type="checkbox"></label>
-        </div>
-      </div>
-
-      <div class="sos-section">
-        <div class="sos-section-header" data-section="global">
-          <span class="sos-section-title">Global Behavior</span>
-          <span class="sos-section-arrow">▶</span>
-        </div>
-        <div class="sos-section-body hidden">
-          <label>Click Gap (sec)<input class="sos-fld" data-path="global.globalBehavior.clickGap" type="number" min="0" step="0.5" placeholder="1"></label>
-          <label class="sos-label-toggle"><span>Smooth Scroll</span><input class="sos-fld sos-toggle-input" data-path="global.globalBehavior.smoothScroll" type="checkbox"></label>
-          <label class="sos-label-toggle"><span>Keep Screen Awake</span><input class="sos-fld sos-toggle-input" data-path="global.globalBehavior.keepScreenAwake" type="checkbox"></label>
-          <label class="sos-label-toggle"><span>Stealth Mode</span><input class="sos-fld sos-toggle-input" data-path="global.globalBehavior.stealthMode" type="checkbox"></label>
         </div>
       </div>
 
@@ -434,6 +429,13 @@ export class FloatingWidget {
     })
 
     this.initTagInput()
+
+    // Auto-save on checkbox group change
+    container.querySelectorAll<HTMLElement>("[data-checkbox-group]").forEach((group) => {
+      group.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((cb) => {
+        cb.addEventListener("change", () => this.persistAndRefresh())
+      })
+    })
 
     // Auto-save on change
     container.querySelectorAll<HTMLElement>(".sos-fld").forEach((el) => {
@@ -502,15 +504,7 @@ export class FloatingWidget {
         if (t) existingTags.push(t.textContent || "")
       })
       if (existingTags.includes(trimmed)) return
-      const tag = document.createElement("span")
-      tag.className = "sos-tag"
-      tag.innerHTML = `<span class="sos-tag-text">${this.escapeHtml(trimmed)}</span><span class="sos-tag-remove" role="button" tabindex="0">&times;</span>`
-      tag.querySelector(".sos-tag-remove")!.addEventListener("click", (e) => {
-        e.stopPropagation()
-        tag.remove()
-        this.persistAndRefresh()
-      })
-      tagList.appendChild(tag)
+      tagList.appendChild(this.createTagEl(trimmed))
       textInput.value = ""
       this.persistAndRefresh()
     }
@@ -526,27 +520,32 @@ export class FloatingWidget {
     })
   }
 
-  private escapeHtml(text: string): string {
-    const div = document.createElement("div")
-    div.textContent = text
-    return div.innerHTML
+  private createTagEl(term: string): HTMLSpanElement {
+    const tag = document.createElement("span")
+    tag.className = "sos-tag"
+    const text = document.createElement("span")
+    text.className = "sos-tag-text"
+    text.textContent = term
+    const remove = document.createElement("span")
+    remove.className = "sos-tag-remove"
+    remove.textContent = "×"
+    remove.setAttribute("role", "button")
+    remove.setAttribute("tabindex", "0")
+    remove.addEventListener("click", (e) => {
+      e.stopPropagation()
+      tag.remove()
+      this.persistAndRefresh()
+    })
+    tag.appendChild(text)
+    tag.appendChild(remove)
+    return tag
   }
 
   private syncTagInputFromSettings(terms: string[]): void {
     const tagList = this.formContainer.querySelector(".sos-tag-list") as HTMLElement
     if (!tagList) return
     tagList.innerHTML = ""
-    terms.forEach((term) => {
-      const tag = document.createElement("span")
-      tag.className = "sos-tag"
-      tag.innerHTML = `<span class="sos-tag-text">${this.escapeHtml(term)}</span><span class="sos-tag-remove" role="button" tabindex="0">&times;</span>`
-      tag.querySelector(".sos-tag-remove")!.addEventListener("click", (e) => {
-        e.stopPropagation()
-        tag.remove()
-        this.persistAndRefresh()
-      })
-      tagList.appendChild(tag)
-    })
+    terms.forEach((term) => tagList.appendChild(this.createTagEl(term)))
   }
 
   private gatherTagInput(): string[] {
@@ -610,10 +609,20 @@ export class FloatingWidget {
       }
     }
 
+    // Sync checkbox groups (data-checkbox-group)
+    this.formContainer.querySelectorAll<HTMLElement>("[data-checkbox-group]").forEach((group) => {
+      const path = group.getAttribute("data-checkbox-group")!
+      const val = this.getValueByPath(path)
+      const arr = Array.isArray(val) ? (val as string[]) : []
+      group.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((cb) => {
+        cb.checked = arr.includes(cb.value)
+      })
+    })
+
     // Sync all data-path fields
     this.formContainer
       .querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
-        "[data-path]"
+        "[data-path]:not([data-tag-container])"
       )
       .forEach((el) => {
         const path = el.getAttribute("data-path")!
@@ -698,7 +707,7 @@ export class FloatingWidget {
       "pauseBeforeSubmit", "pauseAtFailedQuestion", "overwritePreviousAnswers",
       "closeTabs", "followCompanies", "runNonStop", "runInBackground",
       "alternateSortby", "cycleDatePosted", "stopDateCycleAt24hr",
-      "smoothScroll", "keepScreenAwake", "stealthMode",
+      "smoothScroll", "keepScreenAwake",
       "autoFillScreeningQuestions",
     ]
     if (nums.includes(field)) return "num"
@@ -714,6 +723,23 @@ export class FloatingWidget {
     if (site) {
       site.search.searchTerms = this.gatherTagInput()
     }
+
+    // Gather checkbox groups (data-checkbox-group) — directly set array in settings
+    this.formContainer.querySelectorAll<HTMLElement>("[data-checkbox-group]").forEach((group) => {
+      const path = group.getAttribute("data-checkbox-group")!
+      const checked: string[] = []
+      group.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked').forEach((cb) => {
+        checked.push(cb.value)
+      })
+      if (path.startsWith("site.") && this.settings.perSite[this.siteId]) {
+        const parts = path.split(".")
+        const section = parts[1] as keyof SiteSettings
+        const field = parts[2]
+        const obj = this.settings.perSite[this.siteId][section] as unknown as Record<string, unknown>
+        obj[field] = checked
+      }
+    })
+
 
     // Gather all data-path fields
     this.formContainer

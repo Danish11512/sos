@@ -453,3 +453,42 @@ select.sos-fld {
   flex-direction: column;
   gap: 3px;
 }
+
+/* ===== Checkbox group ===== */
+.sos-checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.sos-label-chk {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 500;
+  color: #555;
+  background: #fff;
+  transition: all 0.15s ease;
+}
+
+.sos-label-chk:hover {
+  border-color: #0a66c2;
+  color: #0a66c2;
+}
+
+.sos-label-chk input[type="checkbox"] {
+  accent-color: #0a66c2;
+  cursor: pointer;
+}
+
+.sos-label-chk:has(input:checked) {
+  border-color: #0a66c2;
+  background: #e8f0fe;
+  color: #0a66c2;
+}
