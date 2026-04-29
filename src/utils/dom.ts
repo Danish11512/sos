@@ -2,12 +2,10 @@ export function waitForElement(
   selector: string,
   timeout = 10_000
 ): Promise<Element | null> {
-  return new Promise((resolve) => {
-    if (document.querySelector(selector)) {
-      resolve(document.querySelector(selector))
-      return
-    }
+  const existing = document.querySelector(selector)
+  if (existing) return Promise.resolve(existing)
 
+  return new Promise((resolve) => {
     const observer = new MutationObserver(() => {
       const el = document.querySelector(selector)
       if (el) {
@@ -26,113 +24,84 @@ export function waitForElement(
 }
 
 export function clickElement(el: Element): void {
-  if (el instanceof HTMLElement) {
-    el.click()
-  }
+  if (el instanceof HTMLElement) el.click()
 }
 
 export function fillInput(
   selector: string,
   value: string
 ): HTMLInputElement | HTMLTextAreaElement | null {
-  const el = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(
-    selector
-  )
+  const el = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector)
   if (!el) return null
-
   el.value = value
   el.dispatchEvent(new Event("input", { bubbles: true }))
   el.dispatchEvent(new Event("change", { bubbles: true }))
   return el
 }
 
-/** Wait for a specified number of milliseconds */
 export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/**
- * Find an element by its text content (case-insensitive, exact match after trim).
- * Scopes to a container if provided, otherwise searches the whole document.
- */
+/** Find element by exact text content (case-insensitive, trimmed). */
 export function findElementByText(
   text: string,
-  tag: string = "*",
+  tag = "*",
   container: ParentNode = document
 ): Element | null {
-  const elements = container.querySelectorAll(tag)
-  for (const el of elements) {
-    if (el.textContent?.trim().toLowerCase() === text.toLowerCase()) {
-      return el
-    }
+  const match = text.toLowerCase()
+  for (const el of container.querySelectorAll(tag)) {
+    if (el.textContent?.trim().toLowerCase() === match) return el
   }
   return null
 }
 
-/**
- * Find and click an element by its text content.
- */
-export function clickByText(
-  text: string,
-  tag: string = "*",
-  container: ParentNode = document
-): boolean {
-  const el = findElementByText(text, tag, container)
-  if (el && el instanceof HTMLElement) {
-    el.click()
-    return true
-  }
-  return false
-}
-
-/**
- * Find a button by its aria-label attribute (case-insensitive, partial match).
- */
-export function findButtonByAriaLabel(
-  label: string
-): HTMLButtonElement | null {
-  const buttons = document.querySelectorAll<HTMLButtonElement>("button")
-  for (const btn of buttons) {
-    const ariaLabel = btn.getAttribute("aria-label")?.toLowerCase() || ""
-    if (ariaLabel.includes(label.toLowerCase())) {
-      return btn
-    }
-  }
-  return null
-}
-
-/**
- * Wait for an element to appear and be visible (not hidden).
- */
-export async function waitForVisibleElement(
-  selector: string,
-  timeout = 10_000
-): Promise<Element | null> {
-  const el = await waitForElement(selector, timeout)
-  if (!el) return null
-  
-  // Check if visible
-  const htmlEl = el as HTMLElement
-  if (htmlEl.offsetParent === null) return null
-  return el
-}
-
-/**
- * Check if a checkbox or radio input is currently checked.
- */
-export function isChecked(el: Element): boolean {
-  if (el instanceof HTMLInputElement) {
-    return el.checked
-  }
-  return false
-}
-
-/**
- * Scroll an element into view and then click it.
- */
+/** Scroll element into view then click. */
 export function scrollAndClick(el: Element): void {
   if (el instanceof HTMLElement) {
     el.scrollIntoView({ behavior: "smooth", block: "center" })
   }
   clickElement(el)
+}
+
+/**
+ * Generic helper: click checkbox/label items inside a modal by text content.
+ * Returns the number of items toggled.
+ */
+export async function toggleCheckboxItems(
+  modalContainer: ParentNode,
+  items: Array<{ enabled: boolean; label: string }>,
+  clickDelayMs: number
+): Promise<number> {
+  let count = 0
+  for (const item of items) {
+    if (!item.enabled) continue
+
+    const allLabels = modalContainer.querySelectorAll<HTMLElement>("label, span, div[role='checkbox'], div")
+    let found = false
+    for (const el of allLabels) {
+      if (el.textContent?.trim().toLowerCase().includes(item.label.toLowerCase())) {
+        scrollAndClick(el)
+        await delay(clickDelayMs)
+        count++
+        found = true
+        break
+      }
+    }
+  }
+  return count
+}
+
+/**
+ * Find a button inside a container by text content (case-insensitive, partial match).
+ */
+export function findButtonByText(
+  container: ParentNode,
+  ...texts: string[]
+): Element | null {
+  for (const btn of container.querySelectorAll("button")) {
+    const t = btn.textContent?.trim().toLowerCase() || ""
+    if (texts.some((txt) => t.includes(txt))) return btn
+  }
+  return null
 }

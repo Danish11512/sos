@@ -1,38 +1,27 @@
 import type { FloatingWidgetOptions, WidgetState } from "../types/ui"
 import type { AppSettings, GlobalSettings, SiteSettings } from "../settings/sections"
 import { settingsManager } from "../settings/manager"
-import {
-  DEFAULT_FILTERS,
-  DEFAULT_ANSWERS,
-  DEFAULT_PIPELINE,
-  DEFAULT_ADDITIONAL,
-} from "../settings/sections"
+import { DEFAULT_SITE } from "../settings/sections"
 import { loadSettings, saveSettings } from "./storage"
 import css from "../styles/ui.css?raw"
-
 
 /**
  * Floating UI widget injected into the page with Shadow DOM isolation.
  *
  * State machine: idle → ready → running → done
- *
- * NOTE: UI only — logical hooks are in place but actual pipeline logic is not implemented.
  */
 export class FloatingWidget {
   private container: HTMLElement
   private shadow: ShadowRoot
-
   private expandedEl!: HTMLElement
   private collapsedEl!: HTMLElement
-
   private toggleBtn!: HTMLButtonElement
   private toggleDot!: HTMLSpanElement
   private toggleLabel!: HTMLSpanElement
-
+  private formContainer!: HTMLElement
   private state: WidgetState = "idle"
-  private active: boolean = false
+  private active = false
   private boundClickOutside: (e: MouseEvent) => void
-
   private options: FloatingWidgetOptions
   private settings!: AppSettings
   private siteId: string
@@ -42,35 +31,26 @@ export class FloatingWidget {
     this.siteId = options.siteId
     this.container = document.createElement("div")
     this.container.id = "sos-floating-widget"
-
     this.shadow = this.container.attachShadow({ mode: "closed" })
 
-    this.injectStyles()
-    this.buildUI(options)
+    const style = document.createElement("style")
+    style.textContent = css
+    this.shadow.appendChild(style)
 
-    if (options.initialState) {
-      this.setState(options.initialState)
-    }
+    this.buildUI(options)
+    if (options.initialState) this.setState(options.initialState)
 
     document.body.appendChild(this.container)
 
     this.boundClickOutside = this.handleClickOutside.bind(this)
-    requestAnimationFrame(() => {
-      document.addEventListener("click", this.boundClickOutside)
-    })
+    requestAnimationFrame(() => document.addEventListener("click", this.boundClickOutside))
 
     this.loadAndSync()
   }
 
-  private injectStyles(): void {
-    const style = document.createElement("style")
-    style.textContent = css
-    this.shadow.appendChild(style)
-  }
-
-  /* ------------------------------------------------------------------ */
-  /*  Settings I/O                                                       */
-  /* ------------------------------------------------------------------ */
+  /* ================================================================ */
+  /*  Settings I/O                                                     */
+  /* ================================================================ */
 
   private async loadAndSync(): Promise<void> {
     this.settings = await loadSettings()
@@ -85,25 +65,19 @@ export class FloatingWidget {
   }
 
   private refreshState(): void {
-    const missing = settingsManager.getMissingMandatoryFields(this.siteId)
-    const ready = missing.length === 0
+    const ready = settingsManager.getMissingMandatoryFields(this.siteId).length === 0
     const newState = ready ? "ready" : "idle"
     if (this.state !== "running" && this.state !== "done") {
       this.setState(newState)
-      // Clear any previous validation errors when fields become valid
-      if (ready) {
-        this.clearValidationErrors()
-      }
+      if (ready) this.clearValidationErrors()
     }
   }
 
-
-  /* ------------------------------------------------------------------ */
-  /*  Build UI                                                           */
-  /* ------------------------------------------------------------------ */
+  /* ================================================================ */
+  /*  Build UI                                                        */
+  /* ================================================================ */
 
   private buildUI(options: FloatingWidgetOptions): void {
-    // Expanded
     this.expandedEl = document.createElement("div")
     this.expandedEl.className = "sos-expanded"
 
@@ -117,48 +91,34 @@ export class FloatingWidget {
 
     this.toggleBtn = document.createElement("button")
     this.toggleBtn.className = "sos-toggle-btn sos-toggle-btn--idle"
-
     this.toggleDot = document.createElement("span")
     this.toggleDot.className = "sos-toggle-dot sos-toggle-dot--idle"
-
     this.toggleLabel = document.createElement("span")
     this.toggleLabel.textContent = "Start"
 
     this.toggleBtn.appendChild(this.toggleDot)
     this.toggleBtn.appendChild(this.toggleLabel)
-
-    this.toggleBtn.addEventListener("click", (e) => {
-      e.stopPropagation()
-      this.handleToggle()
-    })
-
+    this.toggleBtn.addEventListener("click", (e) => { e.stopPropagation(); this.handleToggle() })
     header.appendChild(this.toggleBtn)
+
     this.expandedEl.appendChild(header)
 
     const panel = document.createElement("div")
     panel.className = "sos-panel"
-
     this.buildSettingsForm(panel)
-
     this.expandedEl.appendChild(panel)
     this.shadow.appendChild(this.expandedEl)
 
-    // Collapsed badge
     this.collapsedEl = document.createElement("div")
     this.collapsedEl.className = "sos-collapsed hidden"
     this.collapsedEl.textContent = options.badgeText ?? "SOS"
-    this.collapsedEl.addEventListener("click", (e) => {
-      e.stopPropagation()
-      this.expand()
-    })
+    this.collapsedEl.addEventListener("click", (e) => { e.stopPropagation(); this.expand() })
     this.shadow.appendChild(this.collapsedEl)
   }
 
-  /* ------------------------------------------------------------------ */
-  /*  Settings Form  [UI ONLY]                                           */
-  /* ------------------------------------------------------------------ */
-
-  private formContainer!: HTMLElement
+  /* ================================================================ */
+  /*  Settings Form                                                   */
+  /* ================================================================ */
 
   private buildSettingsForm(container: HTMLElement): void {
     this.formContainer = container
@@ -179,50 +139,40 @@ export class FloatingWidget {
           <label>Country *<input class="sos-fld" data-path="global.personal.country" type="text" placeholder="United States"></label>
         </div>
       </div>
-
       <div class="sos-section">
         <div class="sos-section-header" data-section="eeo">
           <span class="sos-section-title">EEO / Diversity</span>
           <span class="sos-section-arrow">▶</span>
         </div>
         <div class="sos-section-body hidden">
-          <label>Ethnicity
-            <select class="sos-fld" data-path="global.eeo.ethnicity">
-              <option value="Decline">Decline</option>
-              <option value="Hispanic/Latino">Hispanic/Latino</option>
-              <option value="American Indian or Alaska Native">American Indian or Alaska Native</option>
-              <option value="Asian">Asian</option>
-              <option value="Black or African American">Black or African American</option>
-              <option value="Native Hawaiian or Other Pacific Islander">Native Hawaiian or Other Pacific Islander</option>
-              <option value="White">White</option>
-              <option value="Other">Other</option>
-            </select>
-          </label>
-          <label>Gender
-            <select class="sos-fld" data-path="global.eeo.gender">
-              <option value="Decline">Decline</option>
-              <option value="Male">Male</option>
-              <option value="Female">Female</option>
-              <option value="Other">Other</option>
-            </select>
-          </label>
-          <label>Disability Status
-            <select class="sos-fld" data-path="global.eeo.disabilityStatus">
-              <option value="Decline">Decline</option>
-              <option value="Yes">Yes</option>
-              <option value="No">No</option>
-            </select>
-          </label>
-          <label>Veteran Status
-            <select class="sos-fld" data-path="global.eeo.veteranStatus">
-              <option value="Decline">Decline</option>
-              <option value="Yes">Yes</option>
-              <option value="No">No</option>
-            </select>
-          </label>
+          <label>Ethnicity<select class="sos-fld" data-path="global.eeo.ethnicity">
+            <option value="Decline">Decline</option>
+            <option value="Hispanic/Latino">Hispanic/Latino</option>
+            <option value="American Indian or Alaska Native">American Indian or Alaska Native</option>
+            <option value="Asian">Asian</option>
+            <option value="Black or African American">Black or African American</option>
+            <option value="Native Hawaiian or Other Pacific Islander">Native Hawaiian or Other Pacific Islander</option>
+            <option value="White">White</option>
+            <option value="Other">Other</option>
+          </select></label>
+          <label>Gender<select class="sos-fld" data-path="global.eeo.gender">
+            <option value="Decline">Decline</option>
+            <option value="Male">Male</option>
+            <option value="Female">Female</option>
+            <option value="Other">Other</option>
+          </select></label>
+          <label>Disability Status<select class="sos-fld" data-path="global.eeo.disabilityStatus">
+            <option value="Decline">Decline</option>
+            <option value="Yes">Yes</option>
+            <option value="No">No</option>
+          </select></label>
+          <label>Veteran Status<select class="sos-fld" data-path="global.eeo.veteranStatus">
+            <option value="Decline">Decline</option>
+            <option value="Yes">Yes</option>
+            <option value="No">No</option>
+          </select></label>
         </div>
       </div>
-
       <div class="sos-section">
         <div class="sos-section-header" data-section="search">
           <span class="sos-section-title">Search & Filters</span>
@@ -235,23 +185,18 @@ export class FloatingWidget {
             <input class="sos-fld sos-tag-text-input" type="text" placeholder="Type a term and press Enter or comma to add">
           </div>
           <label>Search Location<input class="sos-fld" data-path="site.search.searchLocation" type="text" placeholder="United States"></label>
-          <label>Sort By
-            <select class="sos-fld" data-path="site.filters.sortBy">
-              <option value="">—</option>
-              <option value="Most recent">Most recent</option>
-              <option value="Most relevant">Most relevant</option>
-            </select>
-          </label>
-          <label>Date Posted
-            <select class="sos-fld" data-path="site.filters.datePosted">
-              <option value="">—</option>
-              <option value="Any time">Any time</option>
-              <option value="Past month">Past month</option>
-              <option value="Past week">Past week</option>
-              <option value="Past 24 hours">Past 24 hours</option>
-            </select>
-          </label>
-          
+          <label>Sort By<select class="sos-fld" data-path="site.filters.sortBy">
+            <option value="">—</option>
+            <option value="Most recent">Most recent</option>
+            <option value="Most relevant">Most relevant</option>
+          </select></label>
+          <label>Date Posted<select class="sos-fld" data-path="site.filters.datePosted">
+            <option value="">—</option>
+            <option value="Any time">Any time</option>
+            <option value="Past month">Past month</option>
+            <option value="Past week">Past week</option>
+            <option value="Past 24 hours">Past 24 hours</option>
+          </select></label>
           <div class="sos-label-sub">Experience Level</div>
           <div class="sos-checkbox-group" data-checkbox-group="site.filters.experienceLevel">
             <label class="sos-label-chk"><input type="checkbox" value="Internship"> Internship</label>
@@ -280,30 +225,12 @@ export class FloatingWidget {
           <div class="sos-label-sub">Companies <span class="sos-hint">(comma-separated)</span></div>
           <input class="sos-fld" data-path="site.filters.companies" type="text" placeholder="Google, Meta, Apple, ...">
           <label>Switch #<input class="sos-fld" data-path="site.search.switchNumber" type="number" min="1" placeholder="30"></label>
-          <label class="sos-label-toggle">
-            <span>Easy Apply Only</span>
-            <input class="sos-fld sos-toggle-input" data-path="site.filters.easyApplyOnly" type="checkbox">
-          </label>
-          <label class="sos-label-toggle">
-            <span>Randomize Search Order</span>
-            <input class="sos-fld sos-toggle-input" data-path="site.search.randomizeSearchOrder" type="checkbox">
-          </label>
-          <label class="sos-label-toggle">
-            <span>Under 10 Applicants</span>
-            <input class="sos-fld sos-toggle-input" data-path="site.filters.under10Applicants" type="checkbox">
-          </label>
-          <label class="sos-label-toggle">
-            <span>In Your Network</span>
-            <input class="sos-fld sos-toggle-input" data-path="site.filters.inYourNetwork" type="checkbox">
-          </label>
-          <label class="sos-label-toggle">
-            <span>Fair Chance Employer</span>
-            <input class="sos-fld sos-toggle-input" data-path="site.filters.fairChanceEmployer" type="checkbox">
-          </label>
-          <label class="sos-label-toggle">
-            <span>Pause After Filters</span>
-            <input class="sos-fld sos-toggle-input" data-path="site.filters.pauseAfterFilters" type="checkbox">
-          </label>
+          <label class="sos-label-toggle"><span>Easy Apply Only</span><input class="sos-fld sos-toggle-input" data-path="site.filters.easyApplyOnly" type="checkbox"></label>
+          <label class="sos-label-toggle"><span>Randomize Search Order</span><input class="sos-fld sos-toggle-input" data-path="site.search.randomizeSearchOrder" type="checkbox"></label>
+          <label class="sos-label-toggle"><span>Under 10 Applicants</span><input class="sos-fld sos-toggle-input" data-path="site.filters.under10Applicants" type="checkbox"></label>
+          <label class="sos-label-toggle"><span>In Your Network</span><input class="sos-fld sos-toggle-input" data-path="site.filters.inYourNetwork" type="checkbox"></label>
+          <label class="sos-label-toggle"><span>Fair Chance Employer</span><input class="sos-fld sos-toggle-input" data-path="site.filters.fairChanceEmployer" type="checkbox"></label>
+          <label class="sos-label-toggle"><span>Pause After Filters</span><input class="sos-fld sos-toggle-input" data-path="site.filters.pauseAfterFilters" type="checkbox"></label>
           <hr class="sos-separator">
           <div class="sos-label-sub">Skip: Bad Words in Company About <span class="sos-hint">(comma-separated)</span></div>
           <input class="sos-fld" data-path="site.filters.aboutCompanyBadWords" type="text" placeholder="Staffing, Recruiting, ...">
@@ -312,17 +239,10 @@ export class FloatingWidget {
           <div class="sos-label-sub">Skip: Bad Words in Job Description <span class="sos-hint">(comma-separated)</span></div>
           <input class="sos-fld" data-path="site.filters.badWords" type="text" placeholder="US Citizen, No C2C, ...">
           <hr class="sos-separator">
-          <label class="sos-label-toggle">
-            <span>Security Clearance</span>
-            <input class="sos-fld sos-toggle-input" data-path="site.filters.securityClearance" type="checkbox">
-          </label>
-          <label class="sos-label-toggle">
-            <span>Has Master's Degree</span>
-            <input class="sos-fld sos-toggle-input" data-path="site.filters.didMasters" type="checkbox">
-          </label>
+          <label class="sos-label-toggle"><span>Security Clearance</span><input class="sos-fld sos-toggle-input" data-path="site.filters.securityClearance" type="checkbox"></label>
+          <label class="sos-label-toggle"><span>Has Master's Degree</span><input class="sos-fld sos-toggle-input" data-path="site.filters.didMasters" type="checkbox"></label>
         </div>
       </div>
-
       <div class="sos-section">
         <div class="sos-section-header" data-section="answers">
           <span class="sos-section-title">Application Answers</span>
@@ -330,39 +250,33 @@ export class FloatingWidget {
         </div>
         <div class="sos-section-body hidden">
           <label>Years of Experience<input class="sos-fld" data-path="site.answers.yearsOfExperience" type="text" placeholder="5"></label>
-          <label>Desired Salary *
-            <select class="sos-fld" data-path="site.answers.desiredSalary">
-              <option value="">—</option>
-              <option value="40000">$40,000+</option>
-              <option value="60000">$60,000+</option>
-              <option value="80000">$80,000+</option>
-              <option value="100000">$100,000+</option>
-              <option value="120000">$120,000+</option>
-              <option value="140000">$140,000+</option>
-              <option value="160000">$160,000+</option>
-              <option value="180000">$180,000+</option>
-              <option value="200000">$200,000+</option>
-            </select>
-          </label>
-          <label>Require Visa
-            <select class="sos-fld" data-path="site.answers.requireVisa">
-              <option value="No">No</option>
-              <option value="Yes">Yes</option>
-            </select>
-          </label>
+          <label>Desired Salary *<select class="sos-fld" data-path="site.answers.desiredSalary">
+            <option value="">—</option>
+            <option value="40000">$40,000+</option>
+            <option value="60000">$60,000+</option>
+            <option value="80000">$80,000+</option>
+            <option value="100000">$100,000+</option>
+            <option value="120000">$120,000+</option>
+            <option value="140000">$140,000+</option>
+            <option value="160000">$160,000+</option>
+            <option value="180000">$180,000+</option>
+            <option value="200000">$200,000+</option>
+          </select></label>
+          <label>Require Visa<select class="sos-fld" data-path="site.answers.requireVisa">
+            <option value="No">No</option>
+            <option value="Yes">Yes</option>
+          </select></label>
           <label>Portfolio / Website<input class="sos-fld" data-path="site.answers.website" type="text" placeholder="https://..."></label>
           <label>LinkedIn URL<input class="sos-fld" data-path="site.answers.linkedIn" type="text" placeholder="https://linkedin.com/in/..."></label>
-          <label>US Citizenship
-            <select class="sos-fld" data-path="site.answers.usCitizenship">
-              <option value="">—</option>
-              <option value="U.S. Citizen/Permanent Resident">U.S. Citizen/Permanent Resident</option>
-              <option value="Non-citizen allowed to work for any employer">Non-citizen allowed to work for any employer</option>
-              <option value="Non-citizen allowed to work for current employer">Non-citizen allowed to work for current employer</option>
-              <option value="Non-citizen seeking work authorization">Non-citizen seeking work authorization</option>
-              <option value="Canadian Citizen/Permanent Resident">Canadian Citizen/Permanent Resident</option>
-              <option value="Other">Other</option>
-            </select>
-          </label>
+          <label>US Citizenship<select class="sos-fld" data-path="site.answers.usCitizenship">
+            <option value="">—</option>
+            <option value="U.S. Citizen/Permanent Resident">U.S. Citizen/Permanent Resident</option>
+            <option value="Non-citizen allowed to work for any employer">Non-citizen allowed to work for any employer</option>
+            <option value="Non-citizen allowed to work for current employer">Non-citizen allowed to work for current employer</option>
+            <option value="Non-citizen seeking work authorization">Non-citizen seeking work authorization</option>
+            <option value="Canadian Citizen/Permanent Resident">Canadian Citizen/Permanent Resident</option>
+            <option value="Other">Other</option>
+          </select></label>
           <label>Current CTC<input class="sos-fld" data-path="site.answers.currentCtc" type="number" placeholder="80000"></label>
           <label>Notice Period (days)<input class="sos-fld" data-path="site.answers.noticePeriod" type="number" min="0" placeholder="30"></label>
           <label>LinkedIn Headline<input class="sos-fld" data-path="site.answers.linkedinHeadline" type="text" placeholder="Software Engineer @ Google..."></label>
@@ -372,7 +286,6 @@ export class FloatingWidget {
           <label>Confidence Level (1-10)<input class="sos-fld" data-path="site.answers.confidenceLevel" type="text" placeholder="8"></label>
         </div>
       </div>
-
       <div class="sos-section">
         <div class="sos-section-header" data-section="pipeline">
           <span class="sos-section-title">Pipeline & Behavior</span>
@@ -395,7 +308,6 @@ export class FloatingWidget {
           <label class="sos-label-toggle"><span>Stop Date Cycle at 24h</span><input class="sos-fld sos-toggle-input" data-path="site.pipeline.stopDateCycleAt24hr" type="checkbox"></label>
         </div>
       </div>
-
       <div class="sos-section">
         <div class="sos-section-header" data-section="additional">
           <span class="sos-section-title">Additional</span>
@@ -412,13 +324,11 @@ export class FloatingWidget {
           <textarea class="sos-fld sos-textarea sos-custom-answers-input" data-path="site.additional.customAnswers" placeholder="What is your desired salary?,120000&#10;Are you authorized to work in the US?,Yes"></textarea>
         </div>
       </div>
-
       <div class="sos-section-footer">
         <button class="sos-save-btn">Save Settings</button>
       </div>
     `
 
-    // Accordion logic
     container.querySelectorAll(".sos-section-header").forEach((header) => {
       header.addEventListener("click", (e) => {
         e.stopPropagation()
@@ -426,29 +336,23 @@ export class FloatingWidget {
         const body = section.querySelector(".sos-section-body") as HTMLElement
         const arrow = header.querySelector(".sos-section-arrow") as HTMLElement
         const isOpen = !body.classList.contains("hidden")
-        body.classList.toggle("hidden", isOpen)
-        section.classList.toggle("sos-section-open", !isOpen)
+        body.classList.toggle("hidden", isOpen ? false : true)
+        section.classList.toggle("sos-section-open", isOpen ? false : true)
         arrow.textContent = isOpen ? "▶" : "▼"
       })
     })
 
     this.initTagInput()
 
-    // Auto-save on checkbox group change
     container.querySelectorAll<HTMLElement>("[data-checkbox-group]").forEach((group) => {
       group.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((cb) => {
         cb.addEventListener("change", () => this.persistAndRefresh())
       })
     })
 
-    // Auto-save on change
     container.querySelectorAll<HTMLElement>(".sos-fld").forEach((el) => {
       el.addEventListener("change", () => this.persistAndRefresh())
-      if (
-        el.tagName === "INPUT" &&
-        (el as HTMLInputElement).type !== "checkbox" &&
-        !el.classList.contains("sos-tag-text-input")
-      ) {
+      if (el.tagName === "INPUT" && (el as HTMLInputElement).type !== "checkbox" && !el.classList.contains("sos-tag-text-input")) {
         el.addEventListener("blur", () => this.persistAndRefresh())
       }
       if (el.tagName === "TEXTAREA" && !el.classList.contains("sos-custom-answers-input")) {
@@ -456,29 +360,23 @@ export class FloatingWidget {
       }
     })
 
-    // Resume file upload handler
     const resumeInput = container.querySelector(".sos-resume-input") as HTMLInputElement
-    if (resumeInput) {
-      resumeInput.addEventListener("change", (e) => {
-        const file = (e.target as HTMLInputElement).files?.[0]
-        if (!file) return
-        const reader = new FileReader()
-        reader.onload = () => {
-          const dataUrl = reader.result as string
-          if (this.settings) {
-            const site = this.settings.perSite[this.siteId]
-            if (site) {
-              site.additional.resumeData = dataUrl
-              site.additional.resumeFileName = file.name
-              const fnEl = this.formContainer.querySelector(".sos-resume-filename")
-              if (fnEl) fnEl.textContent = file.name
-              this.persistAndRefresh()
-            }
-          }
+    resumeInput?.addEventListener("change", (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0]
+      if (!file || !this.settings) return
+      const reader = new FileReader()
+      reader.onload = () => {
+        const site = this.settings.perSite[this.siteId]
+        if (site) {
+          site.additional.resumeData = reader.result as string
+          site.additional.resumeFileName = file.name
+          const fnEl = this.formContainer.querySelector(".sos-resume-filename")
+          if (fnEl) fnEl.textContent = file.name
+          this.persistAndRefresh()
         }
-        reader.readAsDataURL(file)
-      })
-    }
+      }
+      reader.readAsDataURL(file)
+    })
 
     const saveBtn = container.querySelector(".sos-save-btn")!
     saveBtn.addEventListener("click", (e) => {
@@ -489,9 +387,9 @@ export class FloatingWidget {
     })
   }
 
-  /* ------------------------------------------------------------------ */
-  /*  Tag Input                                                          */
-  /* ------------------------------------------------------------------ */
+  /* ================================================================ */
+  /*  Tag Input                                                       */
+  /* ================================================================ */
 
   private initTagInput(): void {
     const wrapper = this.formContainer.querySelector(".sos-tag-input-wrapper")
@@ -502,12 +400,12 @@ export class FloatingWidget {
     const addTag = (term: string) => {
       const trimmed = term.trim()
       if (!trimmed) return
-      const existingTags: string[] = []
-      tagList.querySelectorAll(".sos-tag").forEach((tagEl) => {
-        const t = tagEl.querySelector(".sos-tag-text")
-        if (t) existingTags.push(t.textContent || "")
-      })
-      if (existingTags.includes(trimmed)) return
+      const existing = new Set(
+        [...tagList.querySelectorAll(".sos-tag")].map(
+          (t) => t.querySelector(".sos-tag-text")?.textContent || ""
+        )
+      )
+      if (existing.has(trimmed)) return
       tagList.appendChild(this.createTagEl(trimmed))
       textInput.value = ""
       this.persistAndRefresh()
@@ -527,21 +425,12 @@ export class FloatingWidget {
   private createTagEl(term: string): HTMLSpanElement {
     const tag = document.createElement("span")
     tag.className = "sos-tag"
-    const text = document.createElement("span")
-    text.className = "sos-tag-text"
-    text.textContent = term
-    const remove = document.createElement("span")
-    remove.className = "sos-tag-remove"
-    remove.textContent = "×"
-    remove.setAttribute("role", "button")
-    remove.setAttribute("tabindex", "0")
-    remove.addEventListener("click", (e) => {
+    tag.innerHTML = `<span class="sos-tag-text">${term}</span><span class="sos-tag-remove" role="button" tabindex="0">×</span>`
+    tag.querySelector(".sos-tag-remove")!.addEventListener("click", (e) => {
       e.stopPropagation()
       tag.remove()
       this.persistAndRefresh()
     })
-    tag.appendChild(text)
-    tag.appendChild(remove)
     return tag
   }
 
@@ -555,44 +444,29 @@ export class FloatingWidget {
   private gatherTagInput(): string[] {
     const tagList = this.formContainer.querySelector(".sos-tag-list") as HTMLElement
     if (!tagList) return []
-    const terms: string[] = []
-    tagList.querySelectorAll(".sos-tag").forEach((tagEl) => {
-      const t = tagEl.querySelector(".sos-tag-text")
-      if (t) terms.push(t.textContent || "")
-    })
-    return terms
+    return [...tagList.querySelectorAll(".sos-tag")].map(
+      (t) => t.querySelector(".sos-tag-text")?.textContent || ""
+    )
   }
 
-  /* ------------------------------------------------------------------ */
-  /*  Sync: Settings → Form                                              */
-  /* ------------------------------------------------------------------ */
+  /* ================================================================ */
+  /*  Sync: Settings → Form                                          */
+  /* ================================================================ */
 
-  /**
-   * Get a value from the settings tree using a dot-path like "global.personal.firstName"
-   * or "site.search.searchTerms".
-   */
   private getValueByPath(path: string): unknown {
     if (!this.settings) return ""
-    const site = this.settings.perSite[this.siteId]
-
-    // "global.xxx.yyy"
     if (path.startsWith("global.")) {
-      const parts = path.split(".")
-      const section = parts[1] as keyof GlobalSettings
-      const field = parts[2]
-      const obj = this.settings.global[section] as unknown as Record<string, unknown>
+      const [, section, field] = path.split(".")
+      const obj = this.settings.global[section as keyof GlobalSettings] as unknown as Record<string, unknown>
       return obj?.[field] ?? ""
     }
-
-    // "site.xxx.yyy"
-    if (path.startsWith("site.") && site) {
-      const parts = path.split(".")
-      const section = parts[1] as keyof SiteSettings
-      const field = parts[2]
-      const obj = site[section] as unknown as Record<string, unknown>
+    if (path.startsWith("site.")) {
+      const [, section, field] = path.split(".")
+      const site = this.settings.perSite[this.siteId]
+      if (!site) return ""
+      const obj = site[section as keyof SiteSettings] as unknown as Record<string, unknown>
       return obj?.[field] ?? ""
     }
-
     return ""
   }
 
@@ -600,242 +474,150 @@ export class FloatingWidget {
     if (!this.settings) return
     const site = this.settings.perSite[this.siteId]
 
-    // Sync search terms tag input
     if (site) {
       this.syncTagInputFromSettings(site.search.searchTerms)
-    }
-
-    // Sync resume filename (span, not a form field)
-    if (site) {
       const fnEl = this.formContainer.querySelector(".sos-resume-filename")
-      if (fnEl && site.additional.resumeFileName) {
-        fnEl.textContent = site.additional.resumeFileName
-      }
+      if (fnEl && site.additional.resumeFileName) fnEl.textContent = site.additional.resumeFileName
     }
 
-    // Sync checkbox groups (data-checkbox-group)
     this.formContainer.querySelectorAll<HTMLElement>("[data-checkbox-group]").forEach((group) => {
       const path = group.getAttribute("data-checkbox-group")!
       const val = this.getValueByPath(path)
-      const arr = Array.isArray(val) ? (val as string[]) : []
+      const arr = Array.isArray(val) ? val as string[] : []
       group.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((cb) => {
         cb.checked = arr.includes(cb.value)
       })
     })
 
-    // Sync all data-path fields (skip file inputs — set by FileReader, not programmatically)
-    this.formContainer
-      .querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
-        "[data-path]:not([data-tag-container])"
-      )
-      .forEach((el) => {
-        if (el.tagName === "INPUT" && (el as HTMLInputElement).type === "file") return
-        const path = el.getAttribute("data-path")!
-        const val = this.getValueByPath(path)
-        this.setFieldValue(el, val, path)
-      })
+    this.formContainer.querySelectorAll<HTMLElement>("[data-path]:not([data-tag-container])").forEach((el) => {
+      if (el.tagName === "INPUT" && (el as HTMLInputElement).type === "file") return
+      const path = el.getAttribute("data-path")!
+      const val = this.getValueByPath(path)
+      this.setFieldValue(el as HTMLInputElement, val, path)
+    })
   }
 
-  private setFieldValue(
-    el: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
-    val: unknown,
-    path?: string
-  ): void {
-    // CustomAnswers is a Record<string,string> — render as CSV lines
+  private setFieldValue(el: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, val: unknown, path?: string): void {
     if (path?.endsWith("customAnswers") && typeof val === "object" && val !== null) {
-      el.value = Object.entries(val as Record<string, string>)
-        .map(([q, a]) => `${q},${a}`)
-        .join("\n")
+      el.value = Object.entries(val as Record<string, string>).map(([q, a]) => `${q},${a}`).join("\n")
       return
     }
-
     if (el.type === "checkbox") {
       (el as HTMLInputElement).checked = Boolean(val)
     } else if (Array.isArray(val)) {
       el.value = val.join(", ")
-    } else if (val != null) {
-      el.value = String(val)
     } else {
-      el.value = ""
+      el.value = val != null ? String(val) : ""
     }
   }
 
-  /* ------------------------------------------------------------------ */
-  /*  Sync: Form → Settings                                              */
-  /* ------------------------------------------------------------------ */
+  /* ================================================================ */
+  /*  Sync: Form → Settings                                          */
+  /* ================================================================ */
 
-  private setValueByPath(path: string, raw: { string: string; number: number; boolean: boolean }): void {
-    // "global.xxx.yyy"
+  private static readonly TYPE_MAP: Record<string, "num" | "bool"> = {
+    clickGap: "num", switchNumber: "num", desiredSalary: "num", currentCtc: "num",
+    noticePeriod: "num", currentExperience: "num",
+    randomizeSearchOrder: "bool", easyApplyOnly: "bool", under10Applicants: "bool",
+    inYourNetwork: "bool", fairChanceEmployer: "bool", pauseAfterFilters: "bool",
+    securityClearance: "bool", didMasters: "bool",
+    pauseBeforeSubmit: "bool", pauseAtFailedQuestion: "bool", overwritePreviousAnswers: "bool",
+    closeTabs: "bool", followCompanies: "bool", runNonStop: "bool", runInBackground: "bool",
+    alternateSortby: "bool", cycleDatePosted: "bool", stopDateCycleAt24hr: "bool",
+    smoothScroll: "bool", keepScreenAwake: "bool", autoFillScreeningQuestions: "bool",
+  }
+
+  private setValueByPath(path: string, value: string): void {
+    const parts = path.split(".")
+    const field = parts[2]
+    const type = FloatingWidget.TYPE_MAP[field] ?? "str"
+
+    let typed: string | number | boolean = value
+    if (type === "num") typed = parseFloat(value) || 0
+    else if (type === "bool") typed = value === "true"
+
     if (path.startsWith("global.")) {
-      const parts = path.split(".")
       const section = parts[1] as keyof GlobalSettings
-      const field = parts[2]
       const obj = this.settings.global[section] as unknown as Record<string, unknown>
-      const dim = this.dimension(field)
-      obj[field] = dim === "num" ? raw.number : dim === "bool" ? raw.boolean : raw.string
+      obj[field] = typed
       return
     }
 
-    // "site.xxx.yyy"
     if (path.startsWith("site.")) {
-      const parts = path.split(".")
       const section = parts[1] as keyof SiteSettings
-      const field = parts[2]
       let site = this.settings.perSite[this.siteId]
       if (!site) {
-        site = {
-          search: { searchTerms: [], searchLocation: "", switchNumber: 30, randomizeSearchOrder: false },
-          filters: DEFAULT_FILTERS,
-          answers: DEFAULT_ANSWERS,
-          pipeline: DEFAULT_PIPELINE,
-          additional: DEFAULT_ADDITIONAL,
-        }
+        site = structuredClone(DEFAULT_SITE) as SiteSettings
         this.settings.perSite[this.siteId] = site
       }
       const obj = site[section] as unknown as Record<string, unknown>
-      const dim = this.dimension(field)
-      obj[field] = dim === "num" ? raw.number : dim === "bool" ? raw.boolean : raw.string
-      return
+      obj[field] = typed
     }
-  }
-
-  /** Determine the type dimension of a field by name convention */
-  private dimension(field: string): "str" | "num" | "bool" {
-    const nums = [
-      "clickGap", "switchNumber", "desiredSalary", "currentCtc", "noticePeriod",
-      "currentExperience",
-    ]
-    const bools = [
-      "randomizeSearchOrder", "easyApplyOnly", "under10Applicants",
-      "inYourNetwork", "fairChanceEmployer", "pauseAfterFilters",
-      "securityClearance", "didMasters",
-      "pauseBeforeSubmit", "pauseAtFailedQuestion", "overwritePreviousAnswers",
-      "closeTabs", "followCompanies", "runNonStop", "runInBackground",
-      "alternateSortby", "cycleDatePosted", "stopDateCycleAt24hr",
-      "smoothScroll", "keepScreenAwake",
-      "autoFillScreeningQuestions",
-    ]
-    if (nums.includes(field)) return "num"
-    if (bools.includes(field)) return "bool"
-    return "str"
   }
 
   private gatherFormIntoSettings(): void {
     if (!this.settings) return
 
-    // Gather search terms from tag input
     const site = this.settings.perSite[this.siteId]
-    if (site) {
-      site.search.searchTerms = this.gatherTagInput()
-    }
+    if (site) site.search.searchTerms = this.gatherTagInput()
 
-    // Gather checkbox groups (data-checkbox-group) — directly set array in settings
     this.formContainer.querySelectorAll<HTMLElement>("[data-checkbox-group]").forEach((group) => {
       const path = group.getAttribute("data-checkbox-group")!
-      const checked: string[] = []
-      group.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked').forEach((cb) => {
-        checked.push(cb.value)
-      })
-      if (path.startsWith("site.") && this.settings.perSite[this.siteId]) {
-        const parts = path.split(".")
-        const section = parts[1] as keyof SiteSettings
-        const field = parts[2]
-        const obj = this.settings.perSite[this.siteId][section] as unknown as Record<string, unknown>
-        obj[field] = checked
-      }
+      if (!path.startsWith("site.")) return
+      const [, section, field] = path.split(".")
+      const site_ = this.settings.perSite[this.siteId]
+      if (!site_) return
+      const obj = site_[section as keyof SiteSettings] as unknown as Record<string, unknown>
+      obj[field] = [...group.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked')].map((cb) => cb.value)
     })
 
+    this.formContainer.querySelectorAll<HTMLElement>("[data-path]:not([data-tag-container])").forEach((el) => {
+      if (el.tagName === "INPUT" && (el as HTMLInputElement).type === "file") return
+      const path = el.getAttribute("data-path")!
 
-    // Gather all data-path fields (skip file inputs — handled separately)
-    this.formContainer
-      .querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(
-        "[data-path]:not([data-tag-container])"
-      )
-      .forEach((el) => {
-        if (el.tagName === "INPUT" && (el as HTMLInputElement).type === "file") return
-        const path = el.getAttribute("data-path")!
-        // CustomAnswers — parse CSV from textarea
-        if (path.endsWith("customAnswers")) {
-          const site2 = this.settings.perSite[this.siteId]
-          if (site2) {
-            const textarea = el as HTMLTextAreaElement
-            const lines = textarea.value.split("\n").filter(Boolean)
-            const answers: Record<string, string> = {}
-            lines.forEach((line) => {
-              const commaIdx = line.indexOf(",")
-              if (commaIdx > 0) {
-                answers[line.slice(0, commaIdx).trim()] = line.slice(commaIdx + 1).trim()
-              }
-            })
-            site2.additional.customAnswers = answers
-          }
-          return
+      if (path.endsWith("customAnswers")) {
+        const site_ = this.settings.perSite[this.siteId]
+        if (site_) {
+          site_.additional.customAnswers = Object.fromEntries(
+            (el as HTMLTextAreaElement).value.split("\n").filter(Boolean).map((line) => {
+              const idx = line.indexOf(",")
+              return idx > 0 ? [line.slice(0, idx).trim(), line.slice(idx + 1).trim()] as const : null
+            }).filter(Boolean) as [string, string][]
+          )
         }
-        this.setValueByPath(path, this.getFieldValue(el))
-      })
+        return
+      }
+
+      const input = el as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
+      this.setValueByPath(path, input.type === "checkbox" ? String((input as HTMLInputElement).checked) : input.value)
+    })
   }
 
-  private getFieldValue(
-    el: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement
-  ): { string: string; number: number; boolean: boolean } {
-    if (el.type === "checkbox") {
-      const b = (el as HTMLInputElement).checked
-      return { string: String(b), number: b ? 1 : 0, boolean: b }
-    }
-    if (el.type === "number") {
-      const n = el.value ? parseFloat(el.value) : 0
-      return { string: el.value, number: n, boolean: n !== 0 }
-    }
-    return {
-      string: el.value,
-      number: parseFloat(el.value) || 0,
-      boolean: el.value !== "" && el.value !== "0" && el.value !== "false",
-    }
-  }
-
-  /* ------------------------------------------------------------------ */
-  /*  State management                                                   */
-  /* ------------------------------------------------------------------ */
+  /* ================================================================ */
+  /*  State management                                                */
+  /* ================================================================ */
 
   private handleClickOutside(e: MouseEvent): void {
-    if (this.expandedEl.classList.contains("hidden")) return
-    if (this.state === "running") return
+    if (this.expandedEl.classList.contains("hidden") || this.state === "running") return
     if (!this.container.contains(e.target as Node)) this.collapse()
   }
 
   setState(state: WidgetState): void {
     this.state = state
-    this.toggleBtn.classList.remove(
-      "sos-toggle-btn--idle", "sos-toggle-btn--ready",
-      "sos-toggle-btn--running", "sos-toggle-btn--done"
-    )
-    this.toggleDot.classList.remove(
-      "sos-toggle-dot--idle", "sos-toggle-dot--ready",
-      "sos-toggle-dot--running", "sos-toggle-dot--done"
-    )
+    this.toggleBtn.className = `sos-toggle-btn sos-toggle-btn--${state}`
+    this.toggleDot.className = `sos-toggle-dot sos-toggle-dot--${state}`
 
     switch (state) {
       case "idle":
-        this.toggleBtn.classList.add("sos-toggle-btn--idle")
-        this.toggleDot.classList.add("sos-toggle-dot--idle")
-        this.toggleLabel.textContent = this.active ? "Stop" : "Start"
-        this.toggleBtn.disabled = false
-        break
       case "ready":
-        this.toggleBtn.classList.add("sos-toggle-btn--ready")
-        this.toggleDot.classList.add("sos-toggle-dot--ready")
         this.toggleLabel.textContent = this.active ? "Stop" : "Start"
         this.toggleBtn.disabled = false
         break
       case "running":
-        this.toggleBtn.classList.add("sos-toggle-btn--running")
-        this.toggleDot.classList.add("sos-toggle-dot--running")
         this.toggleLabel.textContent = "Running"
         this.toggleBtn.disabled = false
         break
       case "done":
-        this.toggleBtn.classList.add("sos-toggle-btn--done")
-        this.toggleDot.classList.add("sos-toggle-dot--done")
         this.toggleLabel.textContent = "Done"
         this.toggleBtn.disabled = true
         break
@@ -844,22 +626,19 @@ export class FloatingWidget {
 
   private handleToggle(): void {
     if (this.state === "idle") {
-      // Save current form before validating
       this.persistAndRefresh()
-      // Run comprehensive validation
       const missing = settingsManager.getMissingMandatoryFields(this.siteId)
       if (missing.length === 0) {
-        // All mandatory fields filled — proceed
         this.active = true
         this.setState("running")
         this.options.onToggle?.(true)
       } else {
-        // Show validation errors and expand relevant sections
         this.showValidationErrors(missing)
         this.expandSectionsWithMissing(missing)
       }
       return
     }
+
     this.active = !this.active
     if (this.active) {
       this.persistAndRefresh()
@@ -870,10 +649,7 @@ export class FloatingWidget {
     this.options.onToggle?.(this.active)
   }
 
-  private showValidationErrors(
-    missing: { section: string; field: string; label: string }[]
-  ): void {
-    // Remove any existing error banner
+  private showValidationErrors(missing: { section: string; field: string; label: string }[]): void {
     this.clearValidationErrors()
 
     const banner = document.createElement("div")
@@ -889,24 +665,19 @@ export class FloatingWidget {
     for (const item of missing) {
       const li = document.createElement("li")
       li.textContent = item.label
-      // Store the section name so we can highlight it
       li.setAttribute("data-section-ref", item.section)
       li.addEventListener("click", () => {
-        // Scroll to the section
-        const sectionEl = this.formContainer.querySelector(`[data-section="${item.section}"]`)
-        if (sectionEl) {
-          // Expand this section
-          const section = sectionEl.closest(".sos-section")
-          if (section) {
-            const body = section.querySelector(".sos-section-body") as HTMLElement
-            const arrow = sectionEl.querySelector(".sos-section-arrow") as HTMLElement
-            body.classList.remove("hidden")
-            section.classList.add("sos-section-open")
-            if (arrow) arrow.textContent = "▼"
-            section.classList.add("sos-section-highlight")
-            setTimeout(() => section.classList.remove("sos-section-highlight"), 2000)
-          }
-        }
+        const header = this.formContainer.querySelector(`[data-section="${item.section}"]`)
+        if (!header) return
+        const section = header.closest(".sos-section")
+        if (!section) return
+        const body = section.querySelector(".sos-section-body") as HTMLElement
+        const arrow = header.querySelector(".sos-section-arrow") as HTMLElement
+        body.classList.remove("hidden")
+        section.classList.add("sos-section-open")
+        if (arrow) arrow.textContent = "▼"
+        section.classList.add("sos-section-highlight")
+        setTimeout(() => section.classList.remove("sos-section-highlight"), 2000)
       })
       list.appendChild(li)
     }
@@ -914,26 +685,18 @@ export class FloatingWidget {
     banner.appendChild(title)
     banner.appendChild(list)
 
-    // Insert at the top of the panel, before the first section
     const firstSection = this.formContainer.querySelector(".sos-section")
-    if (firstSection) {
-      this.formContainer.insertBefore(banner, firstSection)
-    } else {
-      this.formContainer.prepend(banner)
-    }
+    if (firstSection) this.formContainer.insertBefore(banner, firstSection)
+    else this.formContainer.prepend(banner)
 
-    // Auto-scroll to banner
     banner.scrollIntoView({ behavior: "smooth", block: "center" })
   }
 
   private clearValidationErrors(): void {
-    const existing = this.formContainer.querySelector("[data-validation-banner]")
-    if (existing) existing.remove()
+    this.formContainer.querySelector("[data-validation-banner]")?.remove()
   }
 
-  private expandSectionsWithMissing(
-    missing: { section: string; field: string; label: string }[]
-  ): void {
+  private expandSectionsWithMissing(missing: { section: string; field: string; label: string }[]): void {
     const sectionNames = new Set(missing.map((m) => m.section))
     this.formContainer.querySelectorAll(".sos-section").forEach((section) => {
       const header = section.querySelector(".sos-section-header")
@@ -953,7 +716,6 @@ export class FloatingWidget {
       }
     })
   }
-
 
   expand(): void {
     this.expandedEl.classList.remove("hidden")

@@ -3,7 +3,7 @@
  * and handles post-navigation filter application.
  */
 
-import type { SiteSettings, AppSettings } from "../settings/sections"
+import type { AppSettings } from "../settings/sections"
 import { loadSettings } from "../utils/storage"
 import { runLinkedInPipeline, applyLinkedInExtraFilters } from "./linkedin"
 import { runIndeedPipeline, applyIndeedExtraFilters } from "./indeed"
@@ -11,16 +11,17 @@ import type { ApplyFiltersResult } from "./types"
 
 export type { ApplyFiltersResult } from "./types"
 
+async function getSiteSettings(siteId: string): Promise<AppSettings["perSite"][string] | null> {
+  const settings: AppSettings = await loadSettings()
+  return settings.perSite[siteId] ?? null
+}
+
 /**
- * Run the full pipeline for a given site. This navigates the user
- * to the search results page with all URL-based filters applied.
+ * Run the full pipeline for a given site. Navigates to search results with URL-based filters.
  */
 export async function runPipeline(siteId: string): Promise<ApplyFiltersResult> {
-  const settings: AppSettings = await loadSettings()
-  const site = settings.perSite[siteId]
-  if (!site) {
-    return { success: false, appliedCount: 0, errors: ["Site settings not found"] }
-  }
+  const site = await getSiteSettings(siteId)
+  if (!site) return { success: false, appliedCount: 0, errors: ["Site settings not found"] }
 
   switch (siteId) {
     case "linkedin":
@@ -34,16 +35,10 @@ export async function runPipeline(siteId: string): Promise<ApplyFiltersResult> {
 
 /**
  * Apply post-navigation (DOM-based) filters on a search results page.
- * This is called from the content script after the page loads.
- *
- * Returns the result of filter application.
  */
 export async function applyPostNavFilters(siteId: string): Promise<ApplyFiltersResult> {
-  const settings: AppSettings = await loadSettings()
-  const site = settings.perSite[siteId]
-  if (!site) {
-    return { success: false, appliedCount: 0, errors: [] }
-  }
+  const site = await getSiteSettings(siteId)
+  if (!site) return { success: false, appliedCount: 0, errors: [] }
 
   switch (siteId) {
     case "linkedin":
@@ -56,8 +51,7 @@ export async function applyPostNavFilters(siteId: string): Promise<ApplyFiltersR
 }
 
 /**
- * Check if the current URL indicates we're on a search results page
- * where post-nav filters should be applied.
+ * Check if the current URL indicates we're on a search results page.
  */
 export function isOnSearchResultsPage(siteId: string): boolean {
   const url = window.location.href.toLowerCase()

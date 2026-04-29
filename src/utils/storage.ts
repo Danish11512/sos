@@ -3,14 +3,7 @@
  */
 import { browser } from "wxt/browser"
 import type { AppSettings, GlobalSettings, SiteSettings } from "../settings/sections"
-import {
-  DEFAULT_APP_SETTINGS,
-  DEFAULT_SEARCH,
-  DEFAULT_FILTERS,
-  DEFAULT_ANSWERS,
-  DEFAULT_PIPELINE,
-  DEFAULT_ADDITIONAL,
-} from "../settings/sections"
+import { DEFAULT_APP_SETTINGS, DEFAULT_SITE } from "../settings/sections"
 
 const STORAGE_KEY = "sos_settings"
 
@@ -41,11 +34,11 @@ function mergePerSite(raw: Record<string, Partial<SiteSettings>>): Record<string
   const result: Record<string, SiteSettings> = {}
   for (const [siteId, site] of Object.entries(raw)) {
     result[siteId] = {
-      search: { ...DEFAULT_SEARCH, ...(site.search ?? {}) },
-      filters: { ...DEFAULT_FILTERS, ...(site.filters ?? {}) },
-      answers: { ...DEFAULT_ANSWERS, ...(site.answers ?? {}) },
-      pipeline: { ...DEFAULT_PIPELINE, ...(site.pipeline ?? {}) },
-      additional: { ...DEFAULT_ADDITIONAL, ...(site.additional ?? {}) },
+      search: { ...DEFAULT_SITE.search, ...(site.search ?? {}) },
+      filters: { ...DEFAULT_SITE.filters, ...(site.filters ?? {}) },
+      answers: { ...DEFAULT_SITE.answers, ...(site.answers ?? {}) },
+      pipeline: { ...DEFAULT_SITE.pipeline, ...(site.pipeline ?? {}) },
+      additional: { ...DEFAULT_SITE.additional, ...(site.additional ?? {}) },
     }
   }
   return result

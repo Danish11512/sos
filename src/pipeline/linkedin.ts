@@ -14,9 +14,8 @@
  */
 
 import type { SiteSettings } from "../settings/sections"
-import { delay, waitForElement, scrollAndClick, findElementByText } from "../utils/dom"
-import { applyAllFilterTypes } from "./filter-applier"
-import type { ApplyFiltersResult, PipelineSiteConfig } from "./types"
+import { delay, waitForElement, scrollAndClick, toggleCheckboxItems, findButtonByText } from "../utils/dom"
+import type { ApplyFiltersResult } from "./types"
 
 /* ── URL parameter mapping ── */
 
@@ -55,186 +54,72 @@ const SORT_MAP: Record<string, string> = {
   "most relevant": "2",
 }
 
-/* ── Pipeline site config ── */
-
-export const linkedinPipelineConfig: PipelineSiteConfig = {
-  searchUrl: "https://www.linkedin.com/jobs/search/",
-  navWaitMs: 4_000,
-  clickDelayMs: 600,
-  filters: {
-    datePosted: {
-      openFilterPanelSelector: "button[data-control-name='filter_sort_by']",
-      panelContainer: ".search-reusables__filters-bar",
-      applyFilterSelector: "",
-      panelOpenDelay: 500,
-      mappings: [
-        { value: "Any time", labelText: "Any time" },
-        { value: "Past month", labelText: "Past month" },
-        { value: "Past week", labelText: "Past week" },
-        { value: "Past 24 hours", labelText: "Past 24 hours" },
-      ],
-    },
-    sortBy: {
-      openFilterPanelSelector: "",
-      panelContainer: "",
-      applyFilterSelector: "",
-      panelOpenDelay: 0,
-      mappings: [],
-    },
-    experienceLevel: {
-      openFilterPanelSelector: "",
-      panelContainer: "",
-      applyFilterSelector: "",
-      panelOpenDelay: 0,
-      mappings: [],
-    },
-    jobType: {
-      openFilterPanelSelector: "",
-      panelContainer: "",
-      applyFilterSelector: "",
-      panelOpenDelay: 0,
-      mappings: [],
-    },
-    onSite: {
-      openFilterPanelSelector: "",
-      panelContainer: "",
-      applyFilterSelector: "",
-      panelOpenDelay: 0,
-      mappings: [],
-    },
-    easyApplyOnly: {
-      openFilterPanelSelector: "",
-      applyFilterSelector: "",
-      panelOpenDelay: 0,
-      mappings: [],
-    },
-  },
-}
-
 /* ── Build the filtered search URL ── */
 
 function buildSearchUrl(site: SiteSettings): string {
-  const base = "https://www.linkedin.com/jobs/search/?"
   const params = new URLSearchParams()
 
-  // Search terms
   const keywords = site.search.searchTerms.join(" ")
   if (keywords) params.set("keywords", keywords)
+  if (site.search.searchLocation) params.set("location", site.search.searchLocation)
 
-  // Location
-  if (site.search.searchLocation) {
-    params.set("location", site.search.searchLocation)
-  }
-
-  // Sort By
   const sortVal = SORT_MAP[site.filters.sortBy.trim().toLowerCase()]
   if (sortVal) params.set("f_SB2", sortVal)
 
-  // Date Posted (URL param)
   const dateVal = DATE_POSTED_MAP[site.filters.datePosted.trim().toLowerCase()]
   if (dateVal) params.set("f_TPR", dateVal)
 
-  // Experience Level
-  const expCodes = site.filters.experienceLevel
-    .map((v) => EXPERIENCE_MAP[v.trim()])
-    .filter(Boolean)
+  const expCodes = site.filters.experienceLevel.map((v) => EXPERIENCE_MAP[v.trim()]).filter(Boolean)
   if (expCodes.length > 0) params.set("f_E", expCodes.join(","))
 
-  // Job Type
-  const jobCodes = site.filters.jobType
-    .map((v) => JOB_TYPE_MAP[v.trim()])
-    .filter(Boolean)
+  const jobCodes = site.filters.jobType.map((v) => JOB_TYPE_MAP[v.trim()]).filter(Boolean)
   if (jobCodes.length > 0) params.set("f_JT", jobCodes.join(","))
 
-  // On-site / Remote
-  const onsiteCodes = site.filters.onSite
-    .map((v) => ON_SITE_MAP[v.trim()])
-    .filter(Boolean)
+  const onsiteCodes = site.filters.onSite.map((v) => ON_SITE_MAP[v.trim()]).filter(Boolean)
   if (onsiteCodes.length > 0) params.set("f_WT", onsiteCodes.join(","))
 
-  // Easy Apply Only
-  if (site.filters.easyApplyOnly) {
-    params.set("f_AL", "true")
-  }
+  if (site.filters.easyApplyOnly) params.set("f_AL", "true")
 
-  // Under 10 applicants — no URL param, handled via DOM after landing
-
-  // In your network — no URL param, handled via DOM after landing
-
-  // Fair chance employer — no URL param, handled via DOM after landing
-
-  return base + params.toString()
+  return `https://www.linkedin.com/jobs/search/?${params.toString()}`
 }
 
 /* ── DOM-based filter application for LinkedIn (post-nav) ── */
 
-/**
- * Apply filters that cannot be set via URL parameters on LinkedIn.
- * This includes "Under 10 applicants", "In your network", "Fair chance employer".
- *
- * Strategy: Click the "All filters" button, toggle the elements inside the modal,
- * then click "Show results".
- */
 async function applyDomFilters(site: SiteSettings, clickDelayMs: number): Promise<ApplyFiltersResult> {
   const result: ApplyFiltersResult = { success: true, appliedCount: 0, errors: [] }
 
-  // Determine which DOM-only filters are enabled
-  const domFilters: Array<{ enabled: boolean; label: string; selector: string }> = [
-    {
-      enabled: site.filters.under10Applicants,
-      label: "Under 10 applicants",
-      selector: "label[for*='under-10-applicants'] input, label:has(input[value*='under']), label:contains('Under 10')",
-    },
-    {
-      enabled: site.filters.inYourNetwork,
-      label: "In your network",
-      selector: "label[for*='in-network'] input, label:has(input[value*='network'])",
-    },
-    {
-      enabled: site.filters.fairChanceEmployer,
-      label: "Fair chance employer",
-      selector: "label[for*='fair-chance'] input, label:has(input[value*='fair'])",
-    },
+  const domFilters = [
+    { enabled: site.filters.under10Applicants, label: "Under 10 applicants" },
+    { enabled: site.filters.inYourNetwork, label: "In your network" },
+    { enabled: site.filters.fairChanceEmployer, label: "Fair chance employer" },
   ]
 
-  const hasDomFilters = domFilters.some((f) => f.enabled)
-  if (!hasDomFilters) {
+  if (!domFilters.some((f) => f.enabled)) {
     console.log("[SOS] LinkedIn: No DOM-only filters to apply")
     return result
   }
 
   console.log("[SOS] LinkedIn: Opening 'All filters' modal for DOM-based filters")
 
-  // Click the "All filters" button
   const allFiltersBtn = await waitForElement(
     "button[aria-label*='All filters'], button.jobs-search-dropdown__trigger--all-filters",
     6_000
-  )
-
-  let filterTriggerEl: Element | null = allFiltersBtn
-
-  // If the standard button wasn't found, try to find by text
-  if (!filterTriggerEl) {
-    // Try the "All filters" button specifically
-    const buttons = document.querySelectorAll("button")
-    for (const btn of buttons) {
-      if (btn.textContent?.trim().toLowerCase() === "all filters") {
-        filterTriggerEl = btn
-        break
-      }
+  ) ?? (() => {
+    for (const btn of document.querySelectorAll("button")) {
+      if (btn.textContent?.trim().toLowerCase() === "all filters") return btn
     }
-  }
+    return null
+  })()
 
-  if (!filterTriggerEl) {
+  if (!allFiltersBtn) {
     result.errors.push("Could not find 'All filters' button on LinkedIn")
     result.success = false
     return result
   }
 
-  scrollAndClick(filterTriggerEl)
+  scrollAndClick(allFiltersBtn)
   await delay(1_500)
 
-  // Wait for the filter modal to appear
   const modalContainer = await waitForElement(
     ".jobs-search-all-filters__content, div[data-test-all-filters-modal]",
     5_000
@@ -246,70 +131,15 @@ async function applyDomFilters(site: SiteSettings, clickDelayMs: number): Promis
     return result
   }
 
-  // For each active DOM filter, find and click its checkbox/label
-  for (const df of domFilters) {
-    if (!df.enabled) continue
+  result.appliedCount += await toggleCheckboxItems(modalContainer, domFilters, clickDelayMs)
 
-    // Try various selectors to find the checkbox
-    let checkboxEl: Element | null = null
-
-    // Try by label text
-    const allLabels = modalContainer.querySelectorAll("label, span, div")
-    for (const label of allLabels) {
-      const text = label.textContent?.trim().toLowerCase() || ""
-      if (text.includes(df.label.toLowerCase())) {
-        // Click the label (which toggles the checkbox)
-        checkboxEl = label
-        break
-      }
-    }
-
-    if (!checkboxEl) {
-      // Try by input inside the modal
-      const inputs = modalContainer.querySelectorAll<HTMLInputElement>(
-        'input[type="checkbox"]'
-      )
-      for (const input of inputs) {
-        const parentText = input.closest("label")?.textContent?.toLowerCase() || ""
-        if (parentText.includes(df.label.toLowerCase())) {
-          checkboxEl = input
-          break
-        }
-      }
-    }
-
-    if (checkboxEl) {
-      scrollAndClick(checkboxEl)
-      await delay(clickDelayMs)
-      result.appliedCount++
-      console.log(`[SOS] LinkedIn: Toggled "${df.label}" in filter modal`)
-    } else {
-      console.log(`[SOS] LinkedIn: Could not find element for "${df.label}"`)
-    }
-  }
-
-  // Click "Show results" button to apply modal filters
-  const showResultsBtn = await waitForElement(
+  const applyBtn = await waitForElement(
     "button[aria-label*='Show results'], button.jobs-search-all-filters__apply-button",
     5_000
-  )
+  ) ?? findButtonByText(modalContainer, "show results", "apply")
 
-  let resultsBtn: Element | null = showResultsBtn
-
-  if (!resultsBtn) {
-    // Try finding by text
-    const buttons = modalContainer.querySelectorAll("button")
-    for (const btn of buttons) {
-      const text = btn.textContent?.trim().toLowerCase() || ""
-      if (text.includes("show results") || text.includes("apply")) {
-        resultsBtn = btn
-        break
-      }
-    }
-  }
-
-  if (resultsBtn) {
-    scrollAndClick(resultsBtn)
+  if (applyBtn) {
+    scrollAndClick(applyBtn)
     await delay(1_000)
     console.log("[SOS] LinkedIn: Clicked 'Show results' to apply filters")
   } else {
@@ -322,27 +152,18 @@ async function applyDomFilters(site: SiteSettings, clickDelayMs: number): Promis
 /* ── Main pipeline entry ── */
 
 export async function runLinkedInPipeline(site: SiteSettings): Promise<ApplyFiltersResult> {
-  const result: ApplyFiltersResult = { success: true, appliedCount: 0, errors: [] }
-  const cfg = linkedinPipelineConfig
-
-  // Step 1: Navigate to the search URL with URL-based filters
   const searchUrl = buildSearchUrl(site)
   console.log(`[SOS] LinkedIn: Navigating to search URL: ${searchUrl}`)
   window.location.href = searchUrl
-
-  return result
+  return { success: true, appliedCount: 0, errors: [] }
 }
 
 /**
  * Apply extra filters on LinkedIn after the search results page has loaded.
- * This is called from the content script when it detects we're on a LinkedIn
- * jobs search page.
  */
 export async function applyLinkedInExtraFilters(
   site: SiteSettings,
   options?: { clickDelayMs?: number }
 ): Promise<ApplyFiltersResult> {
-  const clickDelay = options?.clickDelayMs ?? 600
-  const result = await applyDomFilters(site, clickDelay)
-  return result
+  return applyDomFilters(site, options?.clickDelayMs ?? 600)
 }
