@@ -142,7 +142,9 @@
 
 /* ===== Accordion sections ===== */
 .sos-section {
-  border-bottom: 1px solid #eee;
+  margin: 0;
+  padding: 0;
+  border: none;
 }
 
 .sos-section-header {
@@ -173,6 +175,10 @@
   transition: transform 0.2s ease;
 }
 
+.sos-section-open {
+  border-bottom: 1px solid #eee;
+}
+
 .sos-section-open .sos-section-arrow {
   transform: rotate(0deg);
 }
@@ -194,6 +200,20 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.sos-section-body.hidden {
+  display: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  border: none !important;
+  opacity: 0 !important;
+  overflow: hidden !important;
+  visibility: hidden !important;
+  transform: none !important;
 }
 
 .sos-section-body label,
