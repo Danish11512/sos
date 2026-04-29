@@ -1,19 +1,32 @@
+import { defineContentScript } from "wxt/sandbox"
+import { browser } from "wxt/browser"
 import { sitePresets } from "../config/sites"
 import type { SitePreset } from "../types/site"
 import { FloatingWidget } from "../utils/ui"
+import { loadSettings } from "../utils/storage"
+import { areSiteSettingsReady } from "../types/settings"
+import type { WidgetState } from "../types/ui"
 
 let widget: FloatingWidget | null = null
 
-function handleSiteDetected(presetId: string): void {
+async function handleSiteDetected(presetId: string): Promise<void> {
   const preset = sitePresets.find((p) => p.id === presetId)
   if (!preset) return
 
   // Destroy previous widget if any (e.g. navigating between sites)
   widget?.destroy()
 
+  // Load settings to determine initial state
+  const settings = await loadSettings()
+  const site = settings.perSite[presetId]
+  const ready = areSiteSettingsReady(settings.global, site)
+  const initialState: WidgetState = ready ? "ready" : "idle"
+
   // Show the new two-piece UI with toggle + settings panel
   widget = new FloatingWidget({
     siteName: preset.name,
+    siteId: preset.id,
+    initialState,
     onToggle: (active) => {
       if (active) {
         console.log(`[SOS] Pipeline started for ${preset.name}`)
@@ -24,7 +37,7 @@ function handleSiteDetected(presetId: string): void {
       }
     },
   })
-  console.log(`[SOS] Widget shown for ${preset.name}`)
+  console.log(`[SOS] Widget shown for ${preset.name} (state: ${initialState})`)
 }
 
 async function runApplyPipeline(preset: SitePreset): Promise<void> {
@@ -32,13 +45,14 @@ async function runApplyPipeline(preset: SitePreset): Promise<void> {
   // Pipeline orchestration will be implemented per feature
 }
 
-browser.runtime.onMessage.addListener((message) => {
-  if (message.type === "SOS_SITE_DETECTED") {
-    handleSiteDetected(message.presetId)
-  }
-})
-
 export default defineContentScript({
-  matches: ["<all_urls>"],
-  main() {},
+  matches: ["*://*.linkedin.com/*", "*://*.indeed.com/*"],
+  main() {
+    browser.runtime.onMessage.addListener((message: unknown) => {
+      const msg = message as { type: string; presetId?: string }
+      if (msg.type === "SOS_SITE_DETECTED" && msg.presetId) {
+        handleSiteDetected(msg.presetId)
+      }
+    })
+  },
 })

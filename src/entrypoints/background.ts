@@ -1,3 +1,5 @@
+import { defineBackground } from "wxt/sandbox"
+import { browser } from "wxt/browser"
 import { sitePresets } from "../config/sites"
 
 export default defineBackground(() => {
