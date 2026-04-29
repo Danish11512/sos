@@ -99,22 +99,139 @@ export class SettingsManager {
   }
 
   isSiteReady(siteId: string): boolean {
+    return this.getMissingMandatoryFields(siteId).length === 0
+  }
+
+  /**
+   * Returns a list of { section, field, label } objects for all mandatory
+   * fields that are NOT yet properly filled in.
+   *
+   * Exemptions (not checked):
+   *   - EEO section entirely (ethicity, gender, disabilityStatus, veteranStatus)
+   *   - companies (filters)
+   *   - website, currentCtc, noticePeriod (answers)
+   *   - linkedinSummary, coverLetter, recentEmployer, confidenceLevel (answers)
+   *   - All checkbox / toggle fields (unchecked = valid "no")
+   *   - All checkbox-group fields (experienceLevel, jobType, onSite)
+
+   */
+  getMissingMandatoryFields(siteId: string): { section: string; field: string; label: string }[] {
+    const missing: { section: string; field: string; label: string }[] = []
     const global = this._data.global
     const site = this._data.perSite[siteId]
-    if (!site) return false
-    const p = global.personal
-    return (
-      p.firstName.trim().length > 0 &&
-      p.lastName.trim().length > 0 &&
-      p.phoneNumber.trim().length > 0 &&
-      p.currentCity.trim().length > 0 &&
-      p.street.trim().length > 0 &&
-      p.state.trim().length > 0 &&
-      p.zipcode.trim().length > 0 &&
-      p.country.trim().length > 0 &&
-      site.search.searchTerms.length > 0
-    )
+    if (!site) return [{ section: "general", field: "site", label: "Site settings not initialized" }]
+
+    const g = global
+
+    /* ── Personal Info ── */
+    const p = g.personal
+    const personalChecks: [string, string, string][] = [
+      ["personal", "firstName", "First Name"],
+      ["personal", "lastName", "Last Name"],
+      ["personal", "phoneNumber", "Phone Number"],
+      ["personal", "currentCity", "Current City"],
+      ["personal", "street", "Street"],
+      ["personal", "state", "State"],
+      ["personal", "zipcode", "Zip Code"],
+      ["personal", "country", "Country"],
+    ]
+    for (const [sec, field, label] of personalChecks) {
+      if (!(p as unknown as Record<string, string>)[field]?.trim()) {
+        missing.push({ section: sec, field, label })
+      }
+    }
+
+    /* ── Search ── */
+    const s = site.search
+    if (s.searchTerms.length === 0) {
+      missing.push({ section: "search", field: "searchTerms", label: "Search Terms (at least 1)" })
+    }
+    if (!s.searchLocation.trim()) {
+      missing.push({ section: "search", field: "searchLocation", label: "Search Location" })
+    }
+    // switchNumber — mandatory (not in exempt list)
+    if (s.switchNumber <= 0 || isNaN(s.switchNumber)) {
+      missing.push({ section: "search", field: "switchNumber", label: "Switch #" })
+    }
+
+
+    /* ── Filters ── */
+    const f = site.filters
+    const filterTextFields: [string, string][] = [
+      ["sortBy", "Sort By"],
+      ["datePosted", "Date Posted"],
+      ["salary", "Salary"],
+    ]
+    for (const [field, label] of filterTextFields) {
+      if (!(f as unknown as Record<string, string>)[field]?.toString().trim()) {
+        missing.push({ section: "filters", field, label })
+      }
+    }
+    // companies is EXEMPT
+    // All checkbox/toggle/checkbox-group fields are EXEMPT
+
+    // Bad word text fields — mandatory per user request (everything not explicitly exempted)
+    if (!(f as unknown as Record<string, string>).aboutCompanyBadWords?.trim()) {
+      missing.push({ section: "filters", field: "aboutCompanyBadWords", label: "Bad Words – Company About" })
+    }
+    if (!(f as unknown as Record<string, string>).aboutCompanyGoodWords?.trim()) {
+      missing.push({ section: "filters", field: "aboutCompanyGoodWords", label: "Good Words – Company About" })
+    }
+    if (!(f as unknown as Record<string, string>).badWords?.trim()) {
+      missing.push({ section: "filters", field: "badWords", label: "Bad Words – Job Description" })
+    }
+    // currentExperience — number; empty/NaN is missing
+    const curExp = (f as unknown as Record<string, unknown>).currentExperience
+    if (curExp == null || (typeof curExp === "number" && isNaN(curExp)) || String(curExp).trim() === "") {
+      missing.push({ section: "filters", field: "currentExperience", label: "Current Experience (years)" })
+    }
+
+    /* ── Answers ── */
+
+    const a = site.answers
+    const answerMandatory: [string, string][] = [
+      ["requireVisa", "Require Visa"],
+      ["yearsOfExperience", "Years of Experience"],
+      ["linkedIn", "LinkedIn URL"],
+      ["usCitizenship", "US Citizenship"],
+      ["desiredSalary", "Desired Salary"],
+      ["linkedinHeadline", "LinkedIn Headline"],
+    ]
+    for (const [field, label] of answerMandatory) {
+      const val = (a as unknown as Record<string, unknown>)[field]
+      const str = String(val ?? "").trim()
+      if (field === "desiredSalary") {
+        const num = typeof val === "number" ? val : parseFloat(str)
+        if (num <= 0 || isNaN(num)) missing.push({ section: "answers", field, label })
+      } else {
+        if (!str) missing.push({ section: "answers", field, label })
+      }
+    }
+    // website, currentCtc, noticePeriod, linkedinSummary, coverLetter, recentEmployer, confidenceLevel are EXEMPT
+
+
+
+    /* ── Pipeline & Behavior ── */
+    // clickGap (global) — mandatory
+    const clickGap = g.globalBehavior.clickGap
+    if (clickGap == null || clickGap <= 0) {
+      missing.push({ section: "pipeline", field: "clickGap", label: "Click Gap" })
+    }
+    // All other pipeline fields are checkboxes — EXEMPT
+
+    /* ── Additional ── */
+    const ad = site.additional
+    // resumeFileName — must be non-empty (file uploaded)
+    if (!ad.resumeFileName?.trim()) {
+      missing.push({ section: "additional", field: "resumeFileName", label: "Resume Upload" })
+    }
+    // customAnswers — mandatory (empty record = valid, but field must exist)
+    // autoFillScreeningQuestions is a checkbox — EXEMPT (unchecked = valid "no")
+
+    return missing
+
   }
+
 
   private ensureShape(): void {
     const g = this._data.global as unknown as Record<string, unknown>

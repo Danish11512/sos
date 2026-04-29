@@ -3,8 +3,7 @@ import { browser } from "wxt/browser"
 import { sitePresets } from "../config/sites"
 import type { SitePreset } from "../types/site"
 import { FloatingWidget } from "../utils/ui"
-import { loadSettings } from "../utils/storage"
-import { areSiteSettingsReady } from "../settings/manager"
+import { settingsManager } from "../settings/manager"
 import type { WidgetState } from "../types/ui"
 
 let widget: FloatingWidget | null = null
@@ -16,10 +15,10 @@ async function handleSiteDetected(presetId: string): Promise<void> {
   // Destroy previous widget if any (e.g. navigating between sites)
   widget?.destroy()
 
-  // Load settings to determine initial state
-  const settings = await loadSettings()
-  const site = settings.perSite[presetId]
-  const ready = areSiteSettingsReady(settings.global, site)
+  // Determine initial state using comprehensive mandatory field check
+  await settingsManager.load()
+  const missing = settingsManager.getMissingMandatoryFields(presetId)
+  const ready = missing.length === 0
   const initialState: WidgetState = ready ? "ready" : "idle"
 
   // Show the new two-piece UI with toggle + settings panel
@@ -38,6 +37,7 @@ async function handleSiteDetected(presetId: string): Promise<void> {
   })
   console.log(`[SOS] Widget shown for ${preset.name} (state: ${initialState})`)
 }
+
 
 async function runApplyPipeline(preset: SitePreset): Promise<void> {
   console.log(`[SOS] Starting apply pipeline for ${preset.name}`)

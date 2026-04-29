@@ -1,6 +1,6 @@
 import type { FloatingWidgetOptions, WidgetState } from "../types/ui"
 import type { AppSettings, GlobalSettings, SiteSettings } from "../settings/sections"
-import { areSiteSettingsReady } from "../settings/manager"
+import { settingsManager } from "../settings/manager"
 import {
   DEFAULT_FILTERS,
   DEFAULT_ANSWERS,
@@ -9,6 +9,7 @@ import {
 } from "../settings/sections"
 import { loadSettings, saveSettings } from "./storage"
 import css from "../styles/ui.css?raw"
+
 
 /**
  * Floating UI widget injected into the page with Shadow DOM isolation.
@@ -84,13 +85,18 @@ export class FloatingWidget {
   }
 
   private refreshState(): void {
-    const site = this.settings.perSite[this.siteId]
-    const ready = areSiteSettingsReady(this.settings.global, site)
+    const missing = settingsManager.getMissingMandatoryFields(this.siteId)
+    const ready = missing.length === 0
     const newState = ready ? "ready" : "idle"
     if (this.state !== "running" && this.state !== "done") {
       this.setState(newState)
+      // Clear any previous validation errors when fields become valid
+      if (ready) {
+        this.clearValidationErrors()
+      }
     }
   }
+
 
   /* ------------------------------------------------------------------ */
   /*  Build UI                                                           */
@@ -837,7 +843,20 @@ export class FloatingWidget {
 
   private handleToggle(): void {
     if (this.state === "idle") {
-      this.expandPersonalSection()
+      // Save current form before validating
+      this.persistAndRefresh()
+      // Run comprehensive validation
+      const missing = settingsManager.getMissingMandatoryFields(this.siteId)
+      if (missing.length === 0) {
+        // All mandatory fields filled — proceed
+        this.active = true
+        this.setState("running")
+        this.options.onToggle?.(true)
+      } else {
+        // Show validation errors and expand relevant sections
+        this.showValidationErrors(missing)
+        this.expandSectionsWithMissing(missing)
+      }
       return
     }
     this.active = !this.active
@@ -850,13 +869,77 @@ export class FloatingWidget {
     this.options.onToggle?.(this.active)
   }
 
-  private expandPersonalSection(): void {
+  private showValidationErrors(
+    missing: { section: string; field: string; label: string }[]
+  ): void {
+    // Remove any existing error banner
+    this.clearValidationErrors()
+
+    const banner = document.createElement("div")
+    banner.className = "sos-validation-banner"
+    banner.setAttribute("data-validation-banner", "")
+
+    const title = document.createElement("div")
+    title.className = "sos-validation-title"
+    title.textContent = "Please complete the following required fields:"
+
+    const list = document.createElement("ul")
+    list.className = "sos-validation-list"
+    for (const item of missing) {
+      const li = document.createElement("li")
+      li.textContent = item.label
+      // Store the section name so we can highlight it
+      li.setAttribute("data-section-ref", item.section)
+      li.addEventListener("click", () => {
+        // Scroll to the section
+        const sectionEl = this.formContainer.querySelector(`[data-section="${item.section}"]`)
+        if (sectionEl) {
+          // Expand this section
+          const section = sectionEl.closest(".sos-section")
+          if (section) {
+            const body = section.querySelector(".sos-section-body") as HTMLElement
+            const arrow = sectionEl.querySelector(".sos-section-arrow") as HTMLElement
+            body.classList.remove("hidden")
+            section.classList.add("sos-section-open")
+            if (arrow) arrow.textContent = "▼"
+            section.classList.add("sos-section-highlight")
+            setTimeout(() => section.classList.remove("sos-section-highlight"), 2000)
+          }
+        }
+      })
+      list.appendChild(li)
+    }
+
+    banner.appendChild(title)
+    banner.appendChild(list)
+
+    // Insert at the top of the panel, before the first section
+    const firstSection = this.formContainer.querySelector(".sos-section")
+    if (firstSection) {
+      this.formContainer.insertBefore(banner, firstSection)
+    } else {
+      this.formContainer.prepend(banner)
+    }
+
+    // Auto-scroll to banner
+    banner.scrollIntoView({ behavior: "smooth", block: "center" })
+  }
+
+  private clearValidationErrors(): void {
+    const existing = this.formContainer.querySelector("[data-validation-banner]")
+    if (existing) existing.remove()
+  }
+
+  private expandSectionsWithMissing(
+    missing: { section: string; field: string; label: string }[]
+  ): void {
+    const sectionNames = new Set(missing.map((m) => m.section))
     this.formContainer.querySelectorAll(".sos-section").forEach((section) => {
       const header = section.querySelector(".sos-section-header")
       const body = section.querySelector(".sos-section-body") as HTMLElement
       const arrow = header?.querySelector(".sos-section-arrow") as HTMLElement
-      const isPersonal = header?.getAttribute("data-section") === "personal"
-      if (isPersonal) {
+      const secName = header?.getAttribute("data-section") || ""
+      if (sectionNames.has(secName)) {
         body.classList.remove("hidden")
         section.classList.add("sos-section-open")
         if (arrow) arrow.textContent = "▼"
@@ -869,6 +952,7 @@ export class FloatingWidget {
       }
     })
   }
+
 
   expand(): void {
     this.expandedEl.classList.remove("hidden")
