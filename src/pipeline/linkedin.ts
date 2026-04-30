@@ -21,6 +21,13 @@
  */
 
 import type { SiteSettings } from "../settings/sections"
+import type { ApplyFiltersResult, JobPreview } from "./types"
+import {
+  checkCompanyBadWords,
+  checkTitleBadWords,
+  validateJobForApplication,
+} from "./job-validator"
+
 import {
   delay,
   waitForElement,
@@ -32,7 +39,6 @@ import {
   pushStateNavigate,
   setReactInputValue,
 } from "../utils/dom"
-import type { ApplyFiltersResult, JobPreview } from "./types"
 
 /* ── Selectors ── */
 
@@ -387,22 +393,9 @@ export async function readAllJobPreviews(maxCards: number): Promise<JobPreview[]
 /* ── Business logic pre-screening ── */
 
 /**
- * Normalize a value expected to be string[].
- * Handles backwards-compatibility with old string-format stored data.
- */
-function normalizeStringArray(val: unknown): string[] {
-  if (Array.isArray(val)) return val
-  if (typeof val === "string" && val.trim()) {
-    return val
-      .split(",")
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean)
-  }
-  return []
-}
-
-/**
- * Apply company-level and title-level filters to previews.
+ * Apply company-level and title-level filters to previews (using shared
+ * pure functions from `job-validator.ts`).
+ *
  * No description available yet — this is a pre-screening pass using
  * only the data available in the list view cards.
  *
@@ -414,39 +407,22 @@ export function filterJobPreviews(
   previews: JobPreview[],
   site: SiteSettings
 ): JobPreview[] {
-  const badCompanyWords = normalizeStringArray(site.filters.aboutCompanyBadWords)
-    .map((w) => w.trim().toLowerCase())
-    .filter(Boolean)
-  const goodCompanyExceptions = normalizeStringArray(site.filters.aboutCompanyGoodWords)
-    .map((w) => w.trim().toLowerCase())
-    .filter(Boolean)
-  const badWords = normalizeStringArray(site.filters.badWords)
-    .map((w) => w.trim().toLowerCase())
-    .filter(Boolean)
-
   const filtered = previews.filter((p) => {
-    const company = p.company.toLowerCase()
-    const title = p.title.toLowerCase()
-
-    // Skip if company name contains a bad word (unless it's an exception)
-    if (badCompanyWords.length > 0) {
-      const hasBadWord = badCompanyWords.some((w) => company.includes(w))
-      if (hasBadWord) {
-        const isException = goodCompanyExceptions.some((ex) => company.includes(ex))
-        if (!isException) {
-          console.log(`[SOS] Filtered out "${p.title}" @ "${p.company}" — bad company word`)
-          return false
-        }
-      }
+    // Use shared pure functions from job-validator
+    const companyOk = checkCompanyBadWords(
+      p.company,
+      site.filters.aboutCompanyBadWords,
+      site.filters.aboutCompanyGoodWords
+    )
+    if (!companyOk) {
+      console.log(`[SOS] Filtered out "${p.title}" @ "${p.company}" — bad company word`)
+      return false
     }
 
-    // Skip if title contains a bad word
-    if (badWords.length > 0) {
-      const hasBadWord = badWords.some((w) => title.includes(w))
-      if (hasBadWord) {
-        console.log(`[SOS] Filtered out "${p.title}" @ "${p.company}" — bad title word`)
-        return false
-      }
+    const titleOk = checkTitleBadWords(p.title, site.filters.badWords)
+    if (!titleOk) {
+      console.log(`[SOS] Filtered out "${p.title}" @ "${p.company}" — bad title word`)
+      return false
     }
 
     return true
@@ -459,6 +435,8 @@ export function filterJobPreviews(
 
   return filtered
 }
+
+
 
 /* ── Per-job processing ── */
 
@@ -511,31 +489,24 @@ async function readJobDescription(
 }
 
 /**
- * Apply description-level filters (bad words in job description body).
- * Returns true if the job passes all filters.
+ * Validate a job against ALL description-level filters using the shared
+ * pure functions from `job-validator.ts`.
+ *
+ * Returns `true` if the job passes all filters and is ready to apply to.
  */
-function applyDescriptionFilters(
+function validateFullJob(
   job: JobPreview,
   description: string,
   site: SiteSettings
 ): boolean {
-  const badWords = normalizeStringArray(site.filters.badWords)
-    .map((w) => w.trim().toLowerCase())
-    .filter(Boolean)
-  if (badWords.length === 0) return true
-
-  const descLower = description.toLowerCase()
-  for (const word of badWords) {
-    if (descLower.includes(word)) {
-      console.log(
-        `[SOS] Filtered out "${job.title}" @ "${job.company}" — bad word "${word}" in description`
-      )
-      return false
-    }
-  }
-
-  return true
+  return validateJobForApplication(
+    job.company,
+    job.title,
+    description,
+    site.filters
+  )
 }
+
 
 /* ── Main pipeline entry ── */
 
@@ -628,8 +599,12 @@ export async function runLinkedInPipeline(
         continue
       }
 
-      // Apply description-level filters
-      if (!applyDescriptionFilters(job, detail.description, site)) {
+      // Validate the job against ALL user filter criteria
+      const isValid = validateFullJob(job, detail.description, site)
+      if (!isValid) {
+        console.log(
+          `[SOS] Skipping "${job.title}" @ "${job.company}" — failed filter validation`
+        )
         continue
       }
 
@@ -641,6 +616,7 @@ export async function runLinkedInPipeline(
         // will continue when the user interacts again
         // TODO: Wire this into a widget "resume" mechanism
       }
+
 
       totalProcessed++
 

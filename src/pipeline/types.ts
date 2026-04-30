@@ -12,6 +12,12 @@ export interface JobListingData {
   location: string
   description: string
   url: string
+  /**
+   * Whether this job passed all user-defined filter checks.
+   * Set to `true` by the pipeline after `validateJobForApplication()`.
+   * The apply flow can gate on this flag before attempting to apply.
+   */
+  readyToApply: boolean
 }
 
 export interface ScrapeJobResult {
@@ -19,6 +25,7 @@ export interface ScrapeJobResult {
   jobs: JobListingData[]
   errors: string[]
 }
+
 
 /**
  * Preview data extracted from a job card in the list view (no detail panel needed).
