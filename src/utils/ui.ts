@@ -626,19 +626,45 @@ export class FloatingWidget {
   /*  Sync: Settings → Form                                          */
   /* ================================================================ */
 
+  /**
+   * Normalize a value that should be a string[].
+   * Handles backwards compatibility: if the value was stored as a raw string
+   * (before the ARRAY_FIELDS fix), splits it on comma.
+   */
+  private static normalizeArrayVal(val: unknown): string[] {
+    if (Array.isArray(val)) return val
+    if (typeof val === "string" && val.trim()) {
+      return val
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    }
+    return []
+  }
+
   private getValueByPath(path: string): unknown {
     if (!this.settings) return ""
     if (path.startsWith("global.")) {
       const [, section, field] = path.split(".")
       const obj = this.settings.global[section as keyof GlobalSettings] as unknown as Record<string, unknown>
-      return obj?.[field] ?? ""
+      const val = obj?.[field] ?? ""
+      // Normalize array fields for backwards compatibility with old string-format data
+      if (FloatingWidget.ARRAY_FIELDS.has(field)) {
+        return FloatingWidget.normalizeArrayVal(val)
+      }
+      return val
     }
     if (path.startsWith("site.")) {
       const [, section, field] = path.split(".")
       const site = this.settings.perSite[this.siteId]
       if (!site) return ""
       const obj = site[section as keyof SiteSettings] as unknown as Record<string, unknown>
-      return obj?.[field] ?? ""
+      const val = obj?.[field] ?? ""
+      // Normalize array fields for backwards compatibility with old string-format data
+      if (FloatingWidget.ARRAY_FIELDS.has(field)) {
+        return FloatingWidget.normalizeArrayVal(val)
+      }
+      return val
     }
     return ""
   }
@@ -688,6 +714,11 @@ export class FloatingWidget {
   /*  Sync: Form → Settings                                          */
   /* ================================================================ */
 
+  /** Fields that are typed as string[] but entered as comma-separated text in the UI. */
+  private static readonly ARRAY_FIELDS = new Set([
+    "aboutCompanyBadWords", "aboutCompanyGoodWords", "badWords", "companies",
+  ])
+
   private static readonly TYPE_MAP: Record<string, "num" | "bool"> = {
     clickGap: "num", switchNumber: "num", desiredSalary: "num", currentCtc: "num",
     noticePeriod: "num", currentExperience: "num",
@@ -705,9 +736,15 @@ export class FloatingWidget {
     const field = parts[2]
     const type = FloatingWidget.TYPE_MAP[field] ?? "str"
 
-    let typed: string | number | boolean = value
+    let typed: string | number | boolean | string[] = value
     if (type === "num") typed = parseFloat(value) || 0
     else if (type === "bool") typed = value === "true"
+    else if (FloatingWidget.ARRAY_FIELDS.has(field)) {
+      typed = value
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    }
 
     if (path.startsWith("global.")) {
       const section = parts[1] as keyof GlobalSettings

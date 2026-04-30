@@ -387,6 +387,21 @@ export async function readAllJobPreviews(maxCards: number): Promise<JobPreview[]
 /* ── Business logic pre-screening ── */
 
 /**
+ * Normalize a value expected to be string[].
+ * Handles backwards-compatibility with old string-format stored data.
+ */
+function normalizeStringArray(val: unknown): string[] {
+  if (Array.isArray(val)) return val
+  if (typeof val === "string" && val.trim()) {
+    return val
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean)
+  }
+  return []
+}
+
+/**
  * Apply company-level and title-level filters to previews.
  * No description available yet — this is a pre-screening pass using
  * only the data available in the list view cards.
@@ -399,13 +414,13 @@ export function filterJobPreviews(
   previews: JobPreview[],
   site: SiteSettings
 ): JobPreview[] {
-  const badCompanyWords = (site.filters.aboutCompanyBadWords || [])
+  const badCompanyWords = normalizeStringArray(site.filters.aboutCompanyBadWords)
     .map((w) => w.trim().toLowerCase())
     .filter(Boolean)
-  const goodCompanyExceptions = (site.filters.aboutCompanyGoodWords || [])
+  const goodCompanyExceptions = normalizeStringArray(site.filters.aboutCompanyGoodWords)
     .map((w) => w.trim().toLowerCase())
     .filter(Boolean)
-  const badWords = (site.filters.badWords || [])
+  const badWords = normalizeStringArray(site.filters.badWords)
     .map((w) => w.trim().toLowerCase())
     .filter(Boolean)
 
@@ -504,7 +519,7 @@ function applyDescriptionFilters(
   description: string,
   site: SiteSettings
 ): boolean {
-  const badWords = (site.filters.badWords || [])
+  const badWords = normalizeStringArray(site.filters.badWords)
     .map((w) => w.trim().toLowerCase())
     .filter(Boolean)
   if (badWords.length === 0) return true
