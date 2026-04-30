@@ -40,6 +40,12 @@ export class SettingsManager {
     this.ensureShape()
   }
 
+  /** Direct-sync the manager's cache without a storage round-trip. */
+  setData(data: AppSettings): void {
+    this._data = data
+    this.ensureShape()
+  }
+
   async save(): Promise<void> {
     this.ensureShape()
     await saveSettings(this._data)
@@ -82,8 +88,6 @@ export class SettingsManager {
     const global = this._data.global
     const site = this._data.perSite[siteId]
     if (!site) return [{ section: "general", field: "site", label: "Site settings not initialized" }]
-
-    const emptyStr = (_: unknown) => !String(_ ?? "").trim()
 
     /* Personal Info */
     const p = global.personal
@@ -141,5 +145,9 @@ export class SettingsManager {
     }
   }
 }
+
+/* ── Helpers ── */
+
+const emptyStr = (_: unknown) => !String(_ ?? "").trim()
 
 export const settingsManager = new SettingsManager()

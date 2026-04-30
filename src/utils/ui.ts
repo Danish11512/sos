@@ -1,14 +1,68 @@
-import type { FloatingWidgetOptions, WidgetState } from "../types/ui"
+import type { FloatingWidgetOptions, SiteWidgetState, SitePipelineState } from "../types/ui"
 import type { AppSettings, GlobalSettings, SiteSettings } from "../settings/sections"
 import { settingsManager } from "../settings/manager"
 import { DEFAULT_SITE } from "../settings/sections"
 import { loadSettings, saveSettings } from "./storage"
+import { browser } from "wxt/browser"
 import css from "../styles/ui.css?raw"
+
+/* ── Per-site state storage key ── */
+
+function stateKey(siteId: string): string {
+  return `sos_state_${siteId}`
+}
+
+async function loadSiteState(siteId: string): Promise<SitePipelineState | null> {
+  const res = await browser.storage.local.get(stateKey(siteId))
+  return (res[stateKey(siteId)] as SitePipelineState) ?? null
+}
+
+async function saveSiteState(siteId: string, st: SitePipelineState): Promise<void> {
+  await browser.storage.local.set({ [stateKey(siteId)]: st })
+}
+
+export async function clearSiteState(siteId: string): Promise<void> {
+  await browser.storage.local.remove(stateKey(siteId))
+}
+
+/* ── Allowed-transition map ── */
+
+const ALLOWED_TRANSITIONS: Record<SiteWidgetState, SiteWidgetState[]> = {
+  idle:         ["ready", "needsInfo", "running", "starting", "paused"], // allow initial overrides from persisted state
+  needsInfo:    ["ready", "idle"],
+  ready:        ["starting", "needsInfo", "idle"],
+  starting:     ["running", "error", "stopped"],
+  running:      ["paused", "done", "error", "stopped"],
+  paused:       ["running", "stopped"],
+  stopped:      ["ready-again"],
+  done:         ["ready-again"],
+  error:        ["ready-again", "ready", "starting"], // allow retry directly
+  "ready-again":["ready", "starting"], // allow restart directly
+}
+
+function canTransition(from: SiteWidgetState, to: SiteWidgetState): boolean {
+  const allowed = ALLOWED_TRANSITIONS[from]
+  return allowed ? allowed.includes(to) : false
+}
+
+/* ── Floating Widget ── */
 
 /**
  * Floating UI widget injected into the page with Shadow DOM isolation.
  *
- * State machine: idle → ready → running → done
+ * Full state machine: idle → ready → starting → running → paused|done|stopped|error → ready-again
+ *
+ * States:
+ *   idle        — grey,   missing required fields
+ *   needsInfo   — grey,   user clicked Start but fields missing (validation banner shown)
+ *   ready       — green,  all fields set, Start clickable
+ *   starting    — blue,   pipeline initializing
+ *   running     — orange, pipeline active, click to stop
+ *   paused      — yellow, pipeline paused (pauseAfterFilters, unknown question)
+ *   stopped     — red,    user stopped pipeline
+ *   done        — green,  pipeline completed
+ *   error       — red,    unrecoverable error, click to retry
+ *   ready-again — green,  after stopped/done/error, can start again
  */
 export class FloatingWidget {
   private container: HTMLElement
@@ -18,13 +72,17 @@ export class FloatingWidget {
   private toggleBtn!: HTMLButtonElement
   private toggleDot!: HTMLSpanElement
   private toggleLabel!: HTMLSpanElement
+  private jobStatusLine!: HTMLDivElement
+  private progressLine!: HTMLDivElement
+  private pauseControlsEl!: HTMLElement
   private formContainer!: HTMLElement
-  private state: WidgetState = "idle"
+  private state: SiteWidgetState = "idle"
   private active = false
   private boundClickOutside: (e: MouseEvent) => void
   private options: FloatingWidgetOptions
   private settings!: AppSettings
   private siteId: string
+  private errMsg: string | null = null
 
   constructor(options: FloatingWidgetOptions) {
     this.options = options
@@ -48,6 +106,63 @@ export class FloatingWidget {
     this.loadAndSync()
   }
 
+  /* ── Public API ── */
+
+  /** Update the job status line (shown above the toggle button when running). */
+  setJobStatus(jobTitle: string, isValid: boolean): void {
+    this.jobStatusLine.textContent = `${jobTitle} — Valid Job: ${isValid ? "Yes" : "No"}`
+  }
+
+  /** Update progress line (shown when running/starting). */
+  setProgress(msg: string): void {
+    this.progressLine.textContent = msg
+    this.progressLine.classList.remove("hidden")
+  }
+
+  /** Clear progress message. */
+  clearProgress(): void {
+    this.progressLine.textContent = ""
+    this.progressLine.classList.add("hidden")
+  }
+
+  /**
+   * Mark pipeline as stopped.
+   * Safe to call multiple times — idempotent after first call.
+   * After a brief moment auto-transitions to ready-again.
+   */
+  setStopped(): void {
+    // Guard: already handled by prior call (handleStop() via pause Stop or toggle)
+    if (this.state === "stopped" || this.state === "ready-again" || this.state === "done") return
+    this.active = false
+    this.setState("stopped")
+    this.jobStatusLine.textContent = ""
+    this.clearProgress()
+    this.clearError()
+    this.clearPauseControls()
+    setTimeout(() => {
+      if (this.state === "stopped") {
+        this.setState("ready-again")
+      }
+    }, 1500)
+  }
+
+  /** Transition to paused state with optional message. */
+  setPaused(msg?: string): void {
+    this.setState("paused")
+    if (msg) this.jobStatusLine.textContent = msg
+    this.showPauseControls()
+  }
+
+  /** Transition to error state with error message. */
+  setError(msg: string): void {
+    this.errMsg = msg
+    this.active = false
+    this.setState("error")
+    this.jobStatusLine.textContent = ""
+    this.clearProgress()
+    this.showError(msg)
+  }
+
   /* ================================================================ */
   /*  Settings I/O                                                     */
   /* ================================================================ */
@@ -55,19 +170,33 @@ export class FloatingWidget {
   private async loadAndSync(): Promise<void> {
     this.settings = await loadSettings()
     this.syncFormFromSettings()
+    // Restore persisted state
+    const persisted = await loadSiteState(this.siteId)
+    if (persisted && persisted.state !== "starting" && persisted.state !== "running" && persisted.state !== "paused") {
+      // Only restore terminal/non-active states (active ones are transient)
+      if (persisted.state === "error" && persisted.error) this.errMsg = persisted.error
+      if (persisted.state === "done" || persisted.state === "stopped" || persisted.state === "error") {
+        this.setState("ready-again")
+      }
+    }
     this.refreshState()
   }
 
   private async persistAndRefresh(): Promise<void> {
     this.gatherFormIntoSettings()
     await saveSettings(this.settings)
+    settingsManager.setData(this.settings)
     this.refreshState()
   }
 
   private refreshState(): void {
+    if (this.state === "running" || this.state === "starting" || this.state === "paused") return
     const ready = settingsManager.getMissingMandatoryFields(this.siteId).length === 0
+    if (this.state === "needsInfo" && !ready) return // keep needsInfo until user fills fields
+    if (this.state === "needsInfo" && ready) { this.setState("ready"); return }
+    if (this.state === "error" || this.state === "done" || this.state === "stopped" || this.state === "ready-again") return
     const newState = ready ? "ready" : "idle"
-    if (this.state !== "running" && this.state !== "done") {
+    if (this.state !== newState) {
       this.setState(newState)
       if (ready) this.clearValidationErrors()
     }
@@ -81,6 +210,7 @@ export class FloatingWidget {
     this.expandedEl = document.createElement("div")
     this.expandedEl.className = "sos-expanded"
 
+    // ── Header ──
     const header = document.createElement("div")
     header.className = "sos-header"
 
@@ -103,17 +233,71 @@ export class FloatingWidget {
 
     this.expandedEl.appendChild(header)
 
+    // ── Progress line (for running/starting) ──
+    this.progressLine = document.createElement("div")
+    this.progressLine.className = "sos-progress-line hidden"
+    this.progressLine.textContent = ""
+    this.expandedEl.appendChild(this.progressLine)
+
+    // ── Pause controls (for paused state) ──
+    this.pauseControlsEl = document.createElement("div")
+    this.pauseControlsEl.className = "sos-pause-controls hidden"
+    this.buildPauseControls()
+    this.expandedEl.appendChild(this.pauseControlsEl)
+
+    // ── Job status line ──
+    this.jobStatusLine = document.createElement("div")
+    this.jobStatusLine.className = "sos-job-status"
+    this.jobStatusLine.textContent = ""
+    this.expandedEl.appendChild(this.jobStatusLine)
+
+    // ── Settings panel ──
     const panel = document.createElement("div")
     panel.className = "sos-panel"
     this.buildSettingsForm(panel)
     this.expandedEl.appendChild(panel)
     this.shadow.appendChild(this.expandedEl)
 
+    // ── Collapsed badge ──
     this.collapsedEl = document.createElement("div")
     this.collapsedEl.className = "sos-collapsed hidden"
     this.collapsedEl.textContent = options.badgeText ?? "SOS"
     this.collapsedEl.addEventListener("click", (e) => { e.stopPropagation(); this.expand() })
     this.shadow.appendChild(this.collapsedEl)
+  }
+
+  private buildPauseControls(): void {
+    this.pauseControlsEl.innerHTML = `
+      <button class="sos-resume-btn" data-resume>▶ Resume</button>
+      <button class="sos-pause-stop-btn" data-pause-stop>■ Stop</button>
+    `
+    this.pauseControlsEl.querySelector("[data-resume]")?.addEventListener("click", (e) => {
+      e.stopPropagation()
+      this.handleResume()
+    })
+    this.pauseControlsEl.querySelector("[data-pause-stop]")?.addEventListener("click", (e) => {
+      e.stopPropagation()
+      this.handleFromPauseStop()
+    })
+  }
+
+  /* ── Pause-controls stop (from paused state) ── */
+  private handleFromPauseStop(): void {
+    this.active = false
+    this.jobStatusLine.textContent = ""
+    this.clearProgress()
+    this.clearError()
+    this.clearPauseControls()
+    // Transition paused → stopped immediately
+    this.setState("stopped")
+    // Notify the parent to clean up (the pipeline may be awaiting user input)
+    this.options.onStop?.()
+    // After a brief moment, ready to start again
+    setTimeout(() => {
+      if (this.state === "stopped") {
+        this.setState("ready-again")
+      }
+    }, 1500)
   }
 
   /* ================================================================ */
@@ -238,6 +422,7 @@ export class FloatingWidget {
           <input class="sos-fld" data-path="site.filters.aboutCompanyGoodWords" type="text" placeholder="Robert Half, ...">
           <div class="sos-label-sub">Skip: Bad Words in Job Description <span class="sos-hint">(comma-separated)</span></div>
           <input class="sos-fld" data-path="site.filters.badWords" type="text" placeholder="US Citizen, No C2C, ...">
+          <label>Current Experience (years)<input class="sos-fld" data-path="site.filters.currentExperience" type="number" min="0" placeholder="5"></label>
           <hr class="sos-separator">
           <label class="sos-label-toggle"><span>Security Clearance</span><input class="sos-fld sos-toggle-input" data-path="site.filters.securityClearance" type="checkbox"></label>
           <label class="sos-label-toggle"><span>Has Master's Degree</span><input class="sos-fld sos-toggle-input" data-path="site.filters.didMasters" type="checkbox"></label>
@@ -330,34 +515,22 @@ export class FloatingWidget {
     `
 
     container.querySelectorAll(".sos-section-header").forEach((header) => {
-      header.addEventListener("click", (e) => {
-        e.stopPropagation()
-        const section = (header as HTMLElement).closest(".sos-section")!
-        const body = section.querySelector(".sos-section-body") as HTMLElement
-        const arrow = header.querySelector(".sos-section-arrow") as HTMLElement
-        const isOpen = !body.classList.contains("hidden")
-        body.classList.toggle("hidden", isOpen ? false : true)
-        section.classList.toggle("sos-section-open", isOpen ? false : true)
-        arrow.textContent = isOpen ? "▶" : "▼"
-      })
+        header.addEventListener("click", (e) => {
+          e.stopPropagation()
+          const section = (header as HTMLElement).closest(".sos-section")!
+          const body = section.querySelector(".sos-section-body") as HTMLElement
+          const arrow = header.querySelector(".sos-section-arrow") as HTMLElement
+          const isOpen = !body.classList.contains("hidden")
+          body.classList.toggle("hidden", isOpen)
+          section.classList.toggle("sos-section-open", isOpen)
+          arrow.textContent = isOpen ? "▶" : "▼"
+        })
     })
 
     this.initTagInput()
 
-    container.querySelectorAll<HTMLElement>("[data-checkbox-group]").forEach((group) => {
-      group.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((cb) => {
-        cb.addEventListener("change", () => this.persistAndRefresh())
-      })
-    })
-
-    container.querySelectorAll<HTMLElement>(".sos-fld").forEach((el) => {
+    container.querySelectorAll<HTMLElement>(".sos-fld:not(.sos-tag-text-input)").forEach((el) => {
       el.addEventListener("change", () => this.persistAndRefresh())
-      if (el.tagName === "INPUT" && (el as HTMLInputElement).type !== "checkbox" && !el.classList.contains("sos-tag-text-input")) {
-        el.addEventListener("blur", () => this.persistAndRefresh())
-      }
-      if (el.tagName === "TEXTAREA" && !el.classList.contains("sos-custom-answers-input")) {
-        el.addEventListener("blur", () => this.persistAndRefresh())
-      }
     })
 
     const resumeInput = container.querySelector(".sos-resume-input") as HTMLInputElement
@@ -598,55 +771,154 @@ export class FloatingWidget {
   /* ================================================================ */
 
   private handleClickOutside(e: MouseEvent): void {
-    if (this.expandedEl.classList.contains("hidden") || this.state === "running") return
+    if (this.expandedEl.classList.contains("hidden") || this.state === "running" || this.state === "starting" || this.state === "paused") return
     if (!this.container.contains(e.target as Node)) this.collapse()
   }
 
-  setState(state: WidgetState): void {
+  setState(state: SiteWidgetState): void {
+    if (!canTransition(this.state, state)) {
+      console.warn(`[SOS] Invalid state transition: ${this.state} → ${state}`)
+      return
+    }
+    console.log(`[SOS] State: ${this.state} → ${state}`)
     this.state = state
     this.toggleBtn.className = `sos-toggle-btn sos-toggle-btn--${state}`
     this.toggleDot.className = `sos-toggle-dot sos-toggle-dot--${state}`
 
     switch (state) {
       case "idle":
+        this.toggleLabel.textContent = "Start"
+        this.toggleBtn.disabled = true
+        this.clearPauseControls()
+        this.clearError()
+        this.clearProgress()
+        break
+      case "needsInfo":
+        this.toggleLabel.textContent = "Start"
+        this.toggleBtn.disabled = true
+        break
       case "ready":
-        this.toggleLabel.textContent = this.active ? "Stop" : "Start"
+        this.toggleLabel.textContent = "Start"
         this.toggleBtn.disabled = false
+        this.clearPauseControls()
+        this.clearError()
+        this.clearProgress()
+        break
+      case "ready-again":
+        this.toggleLabel.textContent = "Start"
+        this.toggleBtn.disabled = false
+        this.clearPauseControls()
+        this.clearError()
+        break
+      case "starting":
+        this.toggleLabel.textContent = "Starting"
+        this.toggleBtn.disabled = true
         break
       case "running":
         this.toggleLabel.textContent = "Running"
         this.toggleBtn.disabled = false
+        this.clearPauseControls()
         break
-      case "done":
-        this.toggleLabel.textContent = "Done"
+      case "paused":
+        this.toggleLabel.textContent = "Paused"
         this.toggleBtn.disabled = true
         break
+      case "stopped":
+        this.toggleLabel.textContent = "Stopped"
+        this.toggleBtn.disabled = true
+        this.clearPauseControls()
+        break
+      case "done":
+        this.toggleLabel.textContent = "Done ✓"
+        this.toggleBtn.disabled = true
+        this.clearPauseControls()
+        this.clearError()
+        this.clearProgress()
+        break
+      case "error":
+        this.toggleLabel.textContent = "Error"
+        this.toggleBtn.disabled = false
+        this.clearPauseControls()
+        this.clearProgress()
+        break
     }
+
+    // Persist state
+    saveSiteState(this.siteId, { state, lastUpdated: Date.now(), error: this.errMsg ?? undefined })
   }
 
-  private handleToggle(): void {
-    if (this.state === "idle") {
-      this.persistAndRefresh()
+  private showPauseControls(): void {
+    this.pauseControlsEl.classList.remove("hidden")
+  }
+
+  private clearPauseControls(): void {
+    this.pauseControlsEl.classList.add("hidden")
+  }
+
+  private showError(msg: string): void {
+    this.clearError()
+    const banner = document.createElement("div")
+    banner.className = "sos-error-banner"
+    banner.setAttribute("data-error-banner", "")
+    banner.innerHTML = `<div class="sos-error-title">Pipeline Error</div><div class="sos-error-message">${msg}</div>`
+    this.formContainer.prepend(banner)
+  }
+
+  private clearError(): void {
+    this.formContainer.querySelector("[data-error-banner]")?.remove()
+  }
+
+  private async handleToggle(): Promise<void> {
+    if (this.state === "idle" || this.state === "needsInfo") {
+      await this.persistAndRefresh()
       const missing = settingsManager.getMissingMandatoryFields(this.siteId)
       if (missing.length === 0) {
-        this.active = true
-        this.setState("running")
-        this.options.onToggle?.(true)
+        this.startPipeline()
       } else {
+        this.setState("needsInfo")
         this.showValidationErrors(missing)
         this.expandSectionsWithMissing(missing)
       }
       return
     }
 
-    this.active = !this.active
-    if (this.active) {
-      this.persistAndRefresh()
-      this.setState("running")
-    } else {
-      this.setState(this.state === "running" ? "ready" : "idle")
+    if (this.state === "running") {
+      this.handleStop()
+      return
     }
-    this.options.onToggle?.(this.active)
+
+    if (this.state === "ready" || this.state === "ready-again" || this.state === "error") {
+      this.startPipeline()
+      return
+    }
+
+    console.warn(`[SOS] Toggle ignored in state: ${this.state}`)
+  }
+
+  /**
+   * Stop triggered by user clicking the toggle button while state = running.
+   * The pipeline catch block will also call setStopped(), but setStopped()
+   * is idempotent so the second call is harmless.
+   */
+  private handleStop(): void {
+    this.options.onStop?.()
+    this.toggleLabel.textContent = "Stopping..."
+  }
+
+  private handleResume(): void {
+    if (this.state !== "paused") return
+    this.setState("running")
+    this.jobStatusLine.textContent = ""
+    this.options.onResume?.()
+  }
+
+  private startPipeline(): void {
+    this.active = true
+    this.jobStatusLine.textContent = ""
+    this.clearValidationErrors()
+    this.clearError()
+    this.setState("starting")
+    this.options.onToggle?.(true)
   }
 
   private showValidationErrors(missing: { section: string; field: string; label: string }[]): void {

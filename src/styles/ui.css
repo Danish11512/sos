@@ -16,6 +16,49 @@
   transform: scale(0.85);
 }
 
+/* ===== Pause / Resume controls (shown when paused) ===== */
+.sos-pause-controls {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  padding: 8px 16px;
+  background: #fff8e1;
+  border-bottom: 1px solid #ffe082;
+}
+
+.sos-resume-btn {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  background: #1e8e3e;
+  color: #fff;
+  transition: background 0.15s ease;
+}
+
+.sos-resume-btn:hover {
+  background: #166b2f;
+}
+
+.sos-pause-stop-btn {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  background: #d93025;
+  color: #fff;
+  transition: background 0.15s ease;
+}
+
+.sos-pause-stop-btn:hover {
+  background: #b71c1c;
+}
+
+
 /* ===== Expanded container ===== */
 .sos-expanded {
   position: fixed;
@@ -101,22 +144,23 @@
   background: #fff;
 }
 
-/* States — running (red pulse) */
+/* States — running (orange, clickable to stop) */
 .sos-toggle-btn--running {
-  background: #d93025;
+  background: #e37400;
   color: #fff;
 }
 
 .sos-toggle-btn--running:hover {
-  background: #b71c1c;
+  background: #c62800;
 }
 
 .sos-toggle-dot--running {
-  background: #fff;
+  background: #ff9800;
   animation: sos-pulse 1.2s ease-in-out infinite;
 }
 
 /* States — done (solid green) */
+
 .sos-toggle-btn--done {
   background: #1e8e3e;
   color: #fff;
@@ -127,10 +171,122 @@
   background: #fff;
 }
 
+/* States — starting (blue, pulsing) */
+.sos-toggle-btn--starting {
+  background: #0a66c2;
+  color: #fff;
+  cursor: default;
+}
+
+.sos-toggle-dot--starting {
+  background: #90caf9;
+  animation: sos-pulse 1.2s ease-in-out infinite;
+}
+
+/* States — paused (yellow/amber) */
+.sos-toggle-btn--paused {
+  background: #f9a825;
+  color: #fff;
+}
+
+.sos-toggle-btn--paused:hover {
+  background: #f57f17;
+}
+
+.sos-toggle-dot--paused {
+  background: #fff;
+}
+
+/* States — error (red) */
+.sos-toggle-btn--error {
+  background: #d93025;
+  color: #fff;
+}
+
+.sos-toggle-btn--error:hover {
+  background: #b71c1c;
+}
+
+.sos-toggle-dot--error {
+  background: #fff;
+}
+
+/* States — needsInfo (grey like idle but with validation banner) */
+.sos-toggle-btn--needsInfo {
+  background: #e0e0e0;
+  color: #999;
+  cursor: not-allowed;
+}
+
+.sos-toggle-dot--needsInfo {
+  background: #bbb;
+}
+
+/* States — ready-again (green, same as ready) */
+.sos-toggle-btn--ready-again {
+  background: #1e8e3e;
+  color: #fff;
+}
+
+.sos-toggle-btn--ready-again:hover {
+  background: #166b2f;
+}
+
+.sos-toggle-dot--ready-again {
+  background: #fff;
+}
+
+/* States — stopped (red) */
+.sos-toggle-btn--stopped {
+  background: #d93025;
+  color: #fff;
+  cursor: default;
+}
+
+.sos-toggle-dot--stopped {
+  background: #fff;
+}
+
+/* ===== Error banner (shown when state = error) ===== */
+.sos-error-banner {
+  background: #ffebee;
+  border-left: 4px solid #d93025;
+  padding: 10px 14px;
+  margin: 0 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sos-error-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #b71c1c;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.sos-error-message {
+  font-size: 11px;
+  color: #b71c1c;
+  line-height: 1.3;
+}
+
+/* ===== Progress line (shown when running/starting) ===== */
+.sos-progress-line {
+  padding: 8px 16px;
+  background: #fff3e0;
+  font-size: 11px;
+  color: #e65100;
+  font-weight: 500;
+  border-bottom: 1px solid #ffe0b2;
+}
+
 @keyframes sos-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
 }
+
 
 /* ===== Settings panel (scrollable) ===== */
 .sos-panel {

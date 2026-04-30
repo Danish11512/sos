@@ -7,12 +7,26 @@ import { DEFAULT_APP_SETTINGS, DEFAULT_SITE } from "../settings/sections"
 
 const STORAGE_KEY = "sos_settings"
 
+/* ── In-memory cache to avoid chrome.storage round-trips on every page load ── */
+let settingsCache: AppSettings | null = null
+
 export async function loadSettings(): Promise<AppSettings> {
+  if (settingsCache) return structuredClone(settingsCache)
   const result = await browser.storage.local.get(STORAGE_KEY)
   const raw = result[STORAGE_KEY] as AppSettings | undefined
-  if (!raw) return structuredClone(DEFAULT_APP_SETTINGS)
-  return mergeWithDefaults(raw)
+  if (!raw) {
+    settingsCache = structuredClone(DEFAULT_APP_SETTINGS)
+    return structuredClone(settingsCache)
+  }
+  settingsCache = mergeWithDefaults(raw)
+  return structuredClone(settingsCache)
 }
+
+/** Reset the in-memory cache so next loadSettings() hits chrome.storage. */
+export function invalidateSettingsCache(): void {
+  settingsCache = null
+}
+
 
 function mergeWithDefaults(raw: Partial<AppSettings>): AppSettings {
   const defaults = structuredClone(DEFAULT_APP_SETTINGS)
@@ -45,8 +59,10 @@ function mergePerSite(raw: Record<string, Partial<SiteSettings>>): Record<string
 }
 
 export async function saveSettings(settings: AppSettings): Promise<void> {
+  settingsCache = settings
   await browser.storage.local.set({ [STORAGE_KEY]: settings })
 }
+
 
 export function onSettingsChanged(
   cb: (settings: AppSettings) => void

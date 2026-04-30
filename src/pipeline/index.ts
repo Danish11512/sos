@@ -1,15 +1,18 @@
 /**
  * Pipeline orchestrator — dispatches to the correct site pipeline
  * and handles post-navigation filter application.
+ *
+ * LinkedIn uses the new DOM-based pipeline (no page reloads).
+ * Other sites (Indeed) use the legacy URL-based navigation pipeline.
  */
 
 import type { AppSettings } from "../settings/sections"
 import { loadSettings } from "../utils/storage"
-import { runLinkedInPipeline, applyLinkedInExtraFilters } from "./linkedin"
+import { runLinkedInPipeline } from "./linkedin"
 import { runIndeedPipeline, applyIndeedExtraFilters } from "./indeed"
-import type { ApplyFiltersResult } from "./types"
+import type { ApplyFiltersResult, ScrapeJobResult } from "./types"
 
-export type { ApplyFiltersResult } from "./types"
+export type { ApplyFiltersResult, ScrapeJobResult } from "./types"
 
 async function getSiteSettings(siteId: string): Promise<AppSettings["perSite"][string] | null> {
   const settings: AppSettings = await loadSettings()
@@ -17,7 +20,9 @@ async function getSiteSettings(siteId: string): Promise<AppSettings["perSite"][s
 }
 
 /**
- * Run the full pipeline for a given site. Navigates to search results with URL-based filters.
+ * Run the full pipeline for a given site.
+ * For LinkedIn: uses DOM-based navigation (no page reload).
+ * For Indeed: uses legacy URL-based navigation.
  */
 export async function runPipeline(siteId: string): Promise<ApplyFiltersResult> {
   const site = await getSiteSettings(siteId)
@@ -25,7 +30,8 @@ export async function runPipeline(siteId: string): Promise<ApplyFiltersResult> {
 
   switch (siteId) {
     case "linkedin":
-      return runLinkedInPipeline(site)
+      await runLinkedInPipeline(site)
+      return { success: true, appliedCount: 0, errors: [] }
     case "indeed":
       return runIndeedPipeline(site)
     default:
@@ -42,7 +48,7 @@ export async function applyPostNavFilters(siteId: string): Promise<ApplyFiltersR
 
   switch (siteId) {
     case "linkedin":
-      return applyLinkedInExtraFilters(site)
+      return { success: true, appliedCount: 0, errors: [] } // LinkedIn handles this internally
     case "indeed":
       return applyIndeedExtraFilters(site)
     default:
@@ -62,5 +68,18 @@ export function isOnSearchResultsPage(siteId: string): boolean {
       return url.includes("/jobs") && url.includes("?q=")
     default:
       return false
+  }
+}
+
+/**
+ * Capture up to maxJobs job listings from the search results page.
+ * Used by the legacy pipeline (Indeed). LinkedIn handles capture internally.
+ */
+export async function captureJobs(siteId: string, maxJobs?: number): Promise<ScrapeJobResult> {
+  switch (siteId) {
+    case "linkedin":
+      return { success: false, jobs: [], errors: ["LinkedIn capture handled internally by runLinkedInPipeline"] }
+    default:
+      return { success: false, jobs: [], errors: [`Job capture not implemented for: ${siteId}`] }
   }
 }
