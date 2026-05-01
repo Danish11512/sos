@@ -258,21 +258,8 @@
   background: #bbb;
 }
 
-/* States — ready-again (green, same as ready) */
-.sos-toggle-btn--ready-again {
-  background: #1e8e3e;
-  color: #fff;
-}
-
-.sos-toggle-btn--ready-again:hover {
-  background: #166b2f;
-}
-
-.sos-toggle-dot--ready-again {
-  background: #fff;
-}
-
 /* States — stopped (red) */
+
 .sos-toggle-btn--stopped {
   background: #d93025;
   color: #fff;

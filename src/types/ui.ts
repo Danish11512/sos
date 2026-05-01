@@ -12,7 +12,6 @@
  *   stopped     — red,   user stopped pipeline
  *   done        — green, pipeline completed all terms
  *   error       — red,   unrecoverable error (click to retry)
- *   ready-again — green, after stopped/done/error — can start again
  */
 export type SiteWidgetState =
   | "idle"
@@ -25,7 +24,7 @@ export type SiteWidgetState =
   | "stopped"
   | "done"
   | "error"
-  | "ready-again"
+
 
 /** Legacy alias for backwards compat. Maps: idle→idle, ready→ready, running→running, done→done */
 export type WidgetState = SiteWidgetState

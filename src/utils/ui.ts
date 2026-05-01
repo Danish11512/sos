@@ -31,15 +31,16 @@ const ALLOWED_TRANSITIONS: Record<SiteWidgetState, SiteWidgetState[]> = {
   idle:         ["nav", "ready", "needsInfo", "running", "starting", "paused"],
   needsInfo:    ["ready", "idle", "nav"],
   nav:          ["idle", "ready"],
-  ready:        ["starting", "needsInfo", "idle"],
+  ready:        ["starting", "needsInfo", "idle", "nav"],
   starting:     ["running", "error", "stopped"],
   running:      ["paused", "done", "error", "stopped"],
   paused:       ["running", "stopped"],
-  stopped:      ["ready-again"],
-  done:         ["ready-again"],
-  error:        ["ready-again", "ready", "starting"],
-  "ready-again":["ready", "starting"],
+  stopped:      ["ready", "nav"],
+  done:         ["ready", "nav"],
+  error:        ["ready", "starting", "nav"],
+
 }
+
 
 function canTransition(from: SiteWidgetState, to: SiteWidgetState): boolean {
   const allowed = ALLOWED_TRANSITIONS[from]
@@ -51,7 +52,7 @@ function canTransition(from: SiteWidgetState, to: SiteWidgetState): boolean {
 /**
  * Floating UI widget injected into the page with Shadow DOM isolation.
  *
- * Full state machine: idle → ready → starting → running → paused|done|stopped|error → ready-again
+ * Full state machine: idle → ready → starting → running → paused|done|stopped|error → ready
  *
  * States:
  *   idle        — grey,   missing required fields
@@ -63,7 +64,7 @@ function canTransition(from: SiteWidgetState, to: SiteWidgetState): boolean {
  *   stopped     — red,    user stopped pipeline
  *   done        — green,  pipeline completed
  *   error       — red,    unrecoverable error, click to retry
- *   ready-again — green,  after stopped/done/error, can start again
+
  */
 export class FloatingWidget {
   private container: HTMLElement
@@ -131,11 +132,11 @@ export class FloatingWidget {
   /**
    * Mark pipeline as stopped.
    * Safe to call multiple times — idempotent after first call.
-   * After a brief moment auto-transitions to ready-again.
+   * After a brief moment auto-transitions to ready.
    */
   setStopped(): void {
     // Guard: already handled by prior call (handleStop() via pause Stop or toggle)
-    if (this.state === "stopped" || this.state === "ready-again" || this.state === "done") return
+    if (this.state === "stopped" || this.state === "ready" || this.state === "done") return
     this.active = false
     this.setState("stopped")
     this.jobStatusLine.textContent = ""
@@ -144,9 +145,10 @@ export class FloatingWidget {
     this.clearPauseControls()
     setTimeout(() => {
       if (this.state === "stopped") {
-        this.setState("ready-again")
+        this.setState("ready")
       }
     }, 1500)
+
   }
 
   /** Transition to paused state with optional message. */
@@ -179,10 +181,11 @@ export class FloatingWidget {
       // Only restore terminal/non-active states (active ones are transient)
       if (persisted.state === "error" && persisted.error) this.errMsg = persisted.error
       if (persisted.state === "done" || persisted.state === "stopped" || persisted.state === "error") {
-        this.setState("ready-again")
+        this.setState("ready")
       }
     }
     this.refreshState()
+
   }
 
   private async persistAndRefresh(): Promise<void> {
@@ -193,11 +196,13 @@ export class FloatingWidget {
   }
 
   private refreshState(): void {
-    if (this.state === "running" || this.state === "starting" || this.state === "paused") return
+    if (this.state === "nav" || this.state === "running" || this.state === "starting" || this.state === "paused") return
+
     const ready = settingsManager.getMissingMandatoryFields(this.siteId).length === 0
     if (this.state === "needsInfo" && !ready) return // keep needsInfo until user fills fields
     if (this.state === "needsInfo" && ready) { this.setState("ready"); return }
-    if (this.state === "error" || this.state === "done" || this.state === "stopped" || this.state === "ready-again") return
+    if (this.state === "error" || this.state === "done" || this.state === "stopped" || this.state === "ready") return
+
     const newState = ready ? "ready" : "idle"
     if (this.state !== newState) {
       this.setState(newState)
@@ -306,9 +311,10 @@ export class FloatingWidget {
     // After a brief moment, ready to start again
     setTimeout(() => {
       if (this.state === "stopped") {
-        this.setState("ready-again")
+        this.setState("ready")
       }
     }, 1500)
+
   }
 
   /* ================================================================ */
@@ -868,15 +874,8 @@ export class FloatingWidget {
         this.clearError()
         this.clearProgress()
         break
-      case "ready-again":
-        this.navBtn.classList.add("hidden")
-        this.toggleBtn.classList.remove("hidden")
-        this.toggleLabel.textContent = "Start"
-        this.toggleBtn.disabled = false
-        this.clearPauseControls()
-        this.clearError()
-        break
       case "starting":
+
         this.navBtn.classList.add("hidden")
         this.toggleBtn.classList.remove("hidden")
         this.toggleLabel.textContent = "Starting"
@@ -971,7 +970,8 @@ export class FloatingWidget {
       return
     }
 
-    if (this.state === "ready" || this.state === "ready-again" || this.state === "error") {
+    if (this.state === "ready" || this.state === "error") {
+
       this.startPipeline()
       return
     }
