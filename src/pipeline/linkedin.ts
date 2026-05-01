@@ -40,76 +40,25 @@ import {
   setReactInputValue,
 } from "../utils/dom"
 
-/* ── Selectors ── */
+import {
+  SEARCH_INPUT_SELECTOR,
+  LINKEDIN_RESULTS_SELECTOR,
+  CARD_SELECTOR,
+  DETAIL_PANEL_SELECTOR,
+  LIST_SCROLLER_SELECTOR,
+  EASY_APPLY_BUTTON_SELECTOR,
+  EXTERNAL_APPLY_SELECTOR,
+  EASY_APPLY_MODAL_SELECTOR,
+  LINKEDIN_JOBS_SEARCH_URL,
+  SEARCH_PAGE_PATH,
+  DATE_POSTED_MAP,
+  EXPERIENCE_MAP,
+  JOB_TYPE_MAP,
+  ON_SITE_MAP,
+  SORT_MAP,
+  FILTER_URL_PARAMS,
+} from "./linkedin-constants"
 
-const SEARCH_INPUT_SELECTOR =
-  "input[aria-label*='Search by title'], " +
-  "input.jobs-search-box__text-input, " +
-  "#jobs-search-box-keywords"
-
-/** Stable selector for the LinkedIn search results sidebar container. */
-const LINKEDIN_RESULTS_SELECTOR =
-  ".jobs-search-results-list, " +
-  ".jobs-search-results__list, " +
-  "ul.jobs-search-results__list, " +
-  "div.scaffold-layout__list"
-
-/** CSS selector for LinkedIn job card anchor elements. */
-const CARD_SELECTOR =
-  "a.job-card-list__title, " +
-  "a.job-card-container__link, " +
-  "li.jobs-search-results__list-item a[href*='/jobs/view']"
-
-/** CSS selector for the job detail panel. */
-const DETAIL_PANEL_SELECTOR =
-  ".jobs-search__job-details, " +
-  "div.jobs-details, " +
-  ".job-view-layout, " +
-  "div.job-details-actions"
-
-/** CSS selector for the job list sidebar scroller. */
-const LIST_SCROLLER_SELECTOR =
-  ".jobs-search-results-list, " +
-  ".jobs-search-results__list, " +
-  "ul.jobs-search-results__list, " +
-  "div.scaffold-layout__list"
-
-/* ── URL parameter mapping ── */
-
-const DATE_POSTED_MAP: Record<string, string> = {
-  "past 24 hours": "r86400",
-  "past week": "r604800",
-  "past month": "r2592000",
-}
-
-const EXPERIENCE_MAP: Record<string, string> = {
-  "Internship": "1",
-  "Entry level": "2",
-  "Associate": "3",
-  "Mid-Senior level": "4",
-  "Director": "5",
-  "Executive": "6",
-}
-
-const JOB_TYPE_MAP: Record<string, string> = {
-  "Full-time": "F",
-  "Part-time": "P",
-  "Contract": "C",
-  "Temporary": "T",
-  "Volunteer": "V",
-  "Internship": "I",
-}
-
-const ON_SITE_MAP: Record<string, string> = {
-  "On-site": "1",
-  "Remote": "2",
-  "Hybrid": "3",
-}
-
-const SORT_MAP: Record<string, string> = {
-  "most recent": "1",
-  "most relevant": "2",
-}
 
 /* ── Filtered URL params helper (for pushState updates) ── */
 
@@ -122,9 +71,10 @@ function buildFilterUrl(site: SiteSettings): URL {
   const url = new URL(window.location.href)
 
   // Remove previous SOS filter params (clean slate)
-  for (const key of ["f_SB2", "f_TPR", "f_E", "f_JT", "f_WT", "f_AL"]) {
+  for (const key of FILTER_URL_PARAMS) {
     url.searchParams.delete(key)
   }
+
 
   // Sort
   const sortVal = SORT_MAP[site.filters.sortBy.trim().toLowerCase()]
@@ -150,6 +100,83 @@ function buildFilterUrl(site: SiteSettings): URL {
   if (site.filters.easyApplyOnly) url.searchParams.set("f_AL", "true")
 
   return url
+}
+
+/* ── Navigation: Search Page (full redirect) ── */
+
+/**
+ * Navigate to the LinkedIn jobs search page via full page redirect.
+ * Used when user is not on a search results page and needs to get there.
+ * This causes a page reload — content script re-initializes after.
+ *
+ * Guards: if already on the search results page, returns early.
+ */
+export function navigateToSearchPage(): void {
+  if (window.location.pathname.includes(SEARCH_PAGE_PATH)) {
+    console.log("[SOS] LinkedIn: Already on search page — skipping redirect")
+    return
+  }
+  console.log("[SOS] LinkedIn: Navigating to jobs search page")
+  window.location.href = LINKEDIN_JOBS_SEARCH_URL
+}
+
+/* ── Navigation: Easy Apply modal ── */
+
+
+/**
+ * Click the Easy Apply button in the job detail panel and wait for the
+ * apply modal to appear.
+ *
+ * Returns the modal element if found, null otherwise.
+ * Throws if the Easy Apply button cannot be found.
+ */
+export async function navigateToApply(
+  detailPanel: Element,
+  signal?: AbortSignal
+): Promise<Element | null> {
+  signal?.throwIfAborted()
+
+  // Find the Easy Apply button inside the detail panel
+  const applyBtn =
+    detailPanel.querySelector<HTMLElement>(EASY_APPLY_BUTTON_SELECTOR) ??
+    (() => {
+      // Fallback: scan all buttons in detail panel for text match
+      for (const btn of detailPanel.querySelectorAll("button")) {
+        const text = btn.textContent?.trim().toLowerCase() || ""
+        if (text.includes("easy apply") || text.includes("apply now") || text === "apply") {
+          return btn
+        }
+      }
+      return null
+    })()
+
+  if (!applyBtn) {
+    // Check if this is an external apply (redirects off LinkedIn)
+    const externalBtn = detailPanel.querySelector<HTMLAnchorElement>(EXTERNAL_APPLY_SELECTOR)
+
+    if (externalBtn) {
+      console.log("[SOS] LinkedIn: Found external apply link — navigating away")
+      window.location.href = externalBtn.href
+      return null
+    }
+
+    console.warn("[SOS] LinkedIn: Could not find Easy Apply button in detail panel")
+    return null
+  }
+
+  console.log("[SOS] LinkedIn: Clicking Easy Apply button")
+  scrollAndClick(applyBtn)
+
+  // Wait for the apply modal to appear
+  const modal = await waitForElement(EASY_APPLY_MODAL_SELECTOR, 8_000)
+  if (!modal) {
+    console.warn("[SOS] LinkedIn: Easy Apply modal did not appear after clicking button")
+    return null
+  }
+
+  console.log("[SOS] LinkedIn: Easy Apply modal opened successfully")
+  await delay(1_000)
+  return modal
 }
 
 /* ── Navigation: Search Term (DOM input manipulation) ── */

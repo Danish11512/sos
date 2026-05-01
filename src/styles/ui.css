@@ -98,7 +98,28 @@
   letter-spacing: 0.2px;
 }
 
+/* ---- Nav button (shown in nav state instead of toggle) ---- */
+.sos-nav-btn {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  cursor: pointer;
+  background: #0a66c2;
+  color: #fff;
+  transition: background 0.2s ease;
+  outline: none;
+}
+
+.sos-nav-btn:hover {
+  background: #0851a0;
+}
+
 /* ---- Toggle button ---- */
+
 .sos-toggle-btn {
   display: flex;
   align-items: center;
@@ -128,6 +149,21 @@
 
 .sos-toggle-dot--idle {
   background: #bbb;
+}
+
+/* States — nav (blue, "Go to Jobs" button when not on search page) */
+.sos-toggle-btn--nav {
+  background: #0a66c2;
+  color: #fff;
+  cursor: pointer;
+}
+
+.sos-toggle-btn--nav:hover {
+  background: #0851a0;
+}
+
+.sos-toggle-dot--nav {
+  background: #fff;
 }
 
 /* States — ready (green, all required fields set) */

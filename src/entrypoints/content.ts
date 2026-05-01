@@ -17,11 +17,13 @@ import type { SiteWidgetState } from "../types/ui"
 import type { AppSettings } from "../settings/sections"
 import { loadSettings } from "../utils/storage"
 import { isOnSearchResultsPage, applyPostNavFilters, captureJobs } from "../pipeline/index"
-import { runLinkedInPipeline } from "../pipeline/linkedin"
+import { runLinkedInPipeline, navigateToSearchPage } from "../pipeline/linkedin"
 
 
 let widget: FloatingWidget | null = null
-let siteDetectedHandled = false
+
+/** Track which URL we last initialized the widget on (SPA-safe, resets on URL change). */
+let widgetInitializedUrl = ""
 
 /** AbortController used to cancel a running LinkedIn pipeline. */
 let abortController: AbortController | null = null
@@ -29,15 +31,14 @@ let abortController: AbortController | null = null
 
 /* ── Widget / site detection ── */
 
-async function handleSiteDetected(presetId: string): Promise<void> {
-  if (siteDetectedHandled) return
-  siteDetectedHandled = true
 
+async function handleSiteDetected(presetId: string): Promise<void> {
   const preset = sitePresets.find((p) => p.id === presetId)
   if (!preset) return
 
-  // ── Gate: only operate on search results pages ──
-  if (!isOnSearchResultsPage(presetId)) return
+  // SPA guard: skip if we already initialized the widget for this exact URL
+  if (widgetInitializedUrl === window.location.href) return
+  widgetInitializedUrl = window.location.href
 
   // Don't destroy + recreate if widget already exists in DOM
   const existingWidgetEl = document.getElementById("sos-floating-widget")
@@ -47,17 +48,29 @@ async function handleSiteDetected(presetId: string): Promise<void> {
     return
   }
 
+  // Determine initial state
+  const onSearchPage = isOnSearchResultsPage(presetId)
+  const missing = settingsManager.getMissingMandatoryFields(presetId)
+  const initialState: SiteWidgetState = !onSearchPage
+    ? "nav"
+    : missing.length === 0
+      ? "ready"
+      : "idle"
+
   // Clean up any orphaned widget reference
   widget?.destroy()
   await settingsManager.load()
-  const missing = settingsManager.getMissingMandatoryFields(presetId)
-  const initialState: SiteWidgetState = missing.length === 0 ? "ready" : "idle"
-
 
   widget = new FloatingWidget({
     siteName: preset.name,
     siteId: preset.id,
     initialState,
+    onNavigate: () => {
+      if (presetId === "linkedin") {
+        navigateToSearchPage()
+      }
+    },
+
     onToggle: async (active) => {
       if (!active) {
         console.log(`[SOS] Stop for ${preset.name}`)
@@ -233,13 +246,13 @@ export default defineContentScript({
       return
     }
 
-    // Direct detection: match hostname + search page synchronously
+    // Direct detection: match hostname + create widget
     ;(async () => {
       try {
         const matchedPreset = sitePresets.find((p) =>
           window.location.hostname.includes(p.urlPattern)
         )
-        if (matchedPreset && isOnSearchResultsPage(matchedPreset.id)) {
+        if (matchedPreset) {
           await handleSiteDetected(matchedPreset.id)
         }
       } catch (e) {
@@ -247,12 +260,28 @@ export default defineContentScript({
       }
     })()
 
-    // Background message
+    // Background message — also listen for URL changes (SPA navigation)
     browser.runtime.onMessage.addListener((message: unknown) => {
       const msg = message as { type: string; presetId?: string }
       if (msg.type === "SOS_SITE_DETECTED" && msg.presetId) {
         handleSiteDetected(msg.presetId)
       }
     })
+
+    // Watch for LinkedIn SPA navigation (pushState) — re-check when URL changes
+    let lastUrl = window.location.href
+    setInterval(() => {
+      if (window.location.href !== lastUrl) {
+        lastUrl = window.location.href
+        // Reset widget URL tracker so it can re-initialize on new search pages
+        widgetInitializedUrl = ""
+        const matchedPreset = sitePresets.find((p) =>
+          window.location.hostname.includes(p.urlPattern)
+        )
+        if (matchedPreset) {
+          handleSiteDetected(matchedPreset.id)
+        }
+      }
+    }, 1000)
   },
 })

@@ -28,16 +28,17 @@ export async function clearSiteState(siteId: string): Promise<void> {
 /* ── Allowed-transition map ── */
 
 const ALLOWED_TRANSITIONS: Record<SiteWidgetState, SiteWidgetState[]> = {
-  idle:         ["ready", "needsInfo", "running", "starting", "paused"], // allow initial overrides from persisted state
-  needsInfo:    ["ready", "idle"],
+  idle:         ["nav", "ready", "needsInfo", "running", "starting", "paused"],
+  needsInfo:    ["ready", "idle", "nav"],
+  nav:          ["idle", "ready"],
   ready:        ["starting", "needsInfo", "idle"],
   starting:     ["running", "error", "stopped"],
   running:      ["paused", "done", "error", "stopped"],
   paused:       ["running", "stopped"],
   stopped:      ["ready-again"],
   done:         ["ready-again"],
-  error:        ["ready-again", "ready", "starting"], // allow retry directly
-  "ready-again":["ready", "starting"], // allow restart directly
+  error:        ["ready-again", "ready", "starting"],
+  "ready-again":["ready", "starting"],
 }
 
 function canTransition(from: SiteWidgetState, to: SiteWidgetState): boolean {
@@ -75,8 +76,10 @@ export class FloatingWidget {
   private jobStatusLine!: HTMLDivElement
   private progressLine!: HTMLDivElement
   private pauseControlsEl!: HTMLElement
+  private navBtn!: HTMLButtonElement
   private formContainer!: HTMLElement
   private state: SiteWidgetState = "idle"
+
   private active = false
   private boundClickOutside: (e: MouseEvent) => void
   private options: FloatingWidgetOptions
@@ -219,6 +222,13 @@ export class FloatingWidget {
     nameEl.textContent = options.siteName
     header.appendChild(nameEl)
 
+    // Nav button — shown only when not on a search results page
+    this.navBtn = document.createElement("button")
+    this.navBtn.className = "sos-nav-btn hidden"
+    this.navBtn.textContent = "Go to Jobs →"
+    this.navBtn.addEventListener("click", (e) => { e.stopPropagation(); this.options.onNavigate?.() })
+    header.appendChild(this.navBtn)
+
     this.toggleBtn = document.createElement("button")
     this.toggleBtn.className = "sos-toggle-btn sos-toggle-btn--idle"
     this.toggleDot = document.createElement("span")
@@ -232,6 +242,7 @@ export class FloatingWidget {
     header.appendChild(this.toggleBtn)
 
     this.expandedEl.appendChild(header)
+
 
     // ── Progress line (for running/starting) ──
     this.progressLine = document.createElement("div")
@@ -823,18 +834,34 @@ export class FloatingWidget {
     this.toggleDot.className = `sos-toggle-dot sos-toggle-dot--${state}`
 
     switch (state) {
+      case "nav":
+        this.navBtn.classList.remove("hidden")
+        this.toggleBtn.classList.add("hidden")
+        this.toggleLabel.textContent = "Start"
+        this.toggleBtn.disabled = false
+        this.clearPauseControls()
+        this.clearError()
+        this.clearProgress()
+        break
       case "idle":
+        this.navBtn.classList.add("hidden")
+        this.toggleBtn.classList.remove("hidden")
         this.toggleLabel.textContent = "Start"
         this.toggleBtn.disabled = true
         this.clearPauseControls()
         this.clearError()
         this.clearProgress()
         break
+
       case "needsInfo":
+        this.navBtn.classList.add("hidden")
+        this.toggleBtn.classList.remove("hidden")
         this.toggleLabel.textContent = "Start"
         this.toggleBtn.disabled = true
         break
       case "ready":
+        this.navBtn.classList.add("hidden")
+        this.toggleBtn.classList.remove("hidden")
         this.toggleLabel.textContent = "Start"
         this.toggleBtn.disabled = false
         this.clearPauseControls()
@@ -842,30 +869,42 @@ export class FloatingWidget {
         this.clearProgress()
         break
       case "ready-again":
+        this.navBtn.classList.add("hidden")
+        this.toggleBtn.classList.remove("hidden")
         this.toggleLabel.textContent = "Start"
         this.toggleBtn.disabled = false
         this.clearPauseControls()
         this.clearError()
         break
       case "starting":
+        this.navBtn.classList.add("hidden")
+        this.toggleBtn.classList.remove("hidden")
         this.toggleLabel.textContent = "Starting"
         this.toggleBtn.disabled = true
         break
       case "running":
+        this.navBtn.classList.add("hidden")
+        this.toggleBtn.classList.remove("hidden")
         this.toggleLabel.textContent = "Running"
         this.toggleBtn.disabled = false
         this.clearPauseControls()
         break
       case "paused":
+        this.navBtn.classList.add("hidden")
+        this.toggleBtn.classList.remove("hidden")
         this.toggleLabel.textContent = "Paused"
         this.toggleBtn.disabled = true
         break
       case "stopped":
+        this.navBtn.classList.add("hidden")
+        this.toggleBtn.classList.remove("hidden")
         this.toggleLabel.textContent = "Stopped"
         this.toggleBtn.disabled = true
         this.clearPauseControls()
         break
       case "done":
+        this.navBtn.classList.add("hidden")
+        this.toggleBtn.classList.remove("hidden")
         this.toggleLabel.textContent = "Done ✓"
         this.toggleBtn.disabled = true
         this.clearPauseControls()
@@ -873,11 +912,14 @@ export class FloatingWidget {
         this.clearProgress()
         break
       case "error":
+        this.navBtn.classList.add("hidden")
+        this.toggleBtn.classList.remove("hidden")
         this.toggleLabel.textContent = "Error"
         this.toggleBtn.disabled = false
         this.clearPauseControls()
         this.clearProgress()
         break
+
     }
 
     // Persist state
@@ -906,6 +948,11 @@ export class FloatingWidget {
   }
 
   private async handleToggle(): Promise<void> {
+    if (this.state === "nav") {
+      this.options.onNavigate?.()
+      return
+    }
+
     if (this.state === "idle" || this.state === "needsInfo") {
       await this.persistAndRefresh()
       const missing = settingsManager.getMissingMandatoryFields(this.siteId)
