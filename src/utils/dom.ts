@@ -1,23 +1,40 @@
 export function waitForElement<T extends Element = Element>(
   selector: string,
-  timeout = 10_000
+  timeout = 10_000,
+  signal?: AbortSignal
 ): Promise<T | null> {
   const existing = document.querySelector<T>(selector)
   if (existing) return Promise.resolve(existing)
 
   return new Promise<T | null>((resolve) => {
+    if (signal?.aborted) {
+      resolve(null)
+      return
+    }
+
     const observer = new MutationObserver(() => {
       const el = document.querySelector<T>(selector)
       if (el) {
         observer.disconnect()
+        if (signal) signal.removeEventListener("abort", onAbort)
         resolve(el)
       }
     })
 
+    function onAbort(): void {
+      observer.disconnect()
+      resolve(null)
+    }
+
     observer.observe(document.body, { childList: true, subtree: true })
+
+    if (signal) {
+      signal.addEventListener("abort", onAbort, { once: true })
+    }
 
     setTimeout(() => {
       observer.disconnect()
+      if (signal) signal.removeEventListener("abort", onAbort)
       resolve(null)
     }, timeout)
   })
@@ -39,8 +56,20 @@ export function fillInput(
   return el
 }
 
-export function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+export function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("Aborted", "AbortError"))
+      return
+    }
+    const timer = setTimeout(resolve, ms)
+    if (signal) {
+      signal.addEventListener("abort", () => {
+        clearTimeout(timer)
+        reject(new DOMException("Aborted", "AbortError"))
+      }, { once: true })
+    }
+  })
 }
 
 /** Find element by exact text content (case-insensitive, trimmed). */
@@ -71,18 +100,21 @@ export function scrollAndClick(el: Element): void {
 export async function toggleCheckboxItems(
   modalContainer: ParentNode,
   items: Array<{ enabled: boolean; label: string }>,
-  clickDelayMs: number
+  clickDelayMs: number,
+  signal?: AbortSignal
 ): Promise<number> {
   let count = 0
   for (const item of items) {
+    if (signal?.aborted) return count
     if (!item.enabled) continue
 
     const allLabels = modalContainer.querySelectorAll<HTMLElement>("label, span, div[role='checkbox'], div")
     let found = false
     for (const el of allLabels) {
+      if (signal?.aborted) return count
       if (el.textContent?.trim().toLowerCase().includes(item.label.toLowerCase())) {
         scrollAndClick(el)
-        await delay(clickDelayMs)
+        await delay(clickDelayMs, signal)
         count++
         found = true
         break
@@ -113,12 +145,14 @@ export function findButtonByText(
 export async function scrollToBottom(
   el: Element,
   maxAttempts = 20,
-  intervalMs = 500
+  intervalMs = 500,
+  signal?: AbortSignal
 ): Promise<number> {
   let prevHeight = 0
   for (let i = 0; i < maxAttempts; i++) {
+    if (signal?.aborted) return el.scrollHeight
     el.scrollTop = el.scrollHeight
-    await delay(intervalMs)
+    await delay(intervalMs, signal)
     if (el.scrollHeight === prevHeight) break
     prevHeight = el.scrollHeight
   }

@@ -92,9 +92,16 @@ async function handleSiteDetected(presetId: string): Promise<void> {
         abortController = new AbortController()
         widget?.setState("running")
         try {
-          await runLinkedInPipeline(site, abortController.signal, (msg) => {
-            console.log(`[SOS] ${msg}`)
-          })
+          await runLinkedInPipeline(
+            site,
+            abortController.signal,
+            (msg) => {
+              console.log(`[SOS] ${msg}`)
+            },
+            (jobTitle, isValid) => {
+              widget?.setJobStatus(jobTitle, isValid)
+            }
+          )
           widget?.setState("done")
         } catch (err: unknown) {
           if (err instanceof Error && err.name === "AbortError") {

@@ -168,14 +168,14 @@ export async function navigateToApply(
   scrollAndClick(applyBtn)
 
   // Wait for the apply modal to appear
-  const modal = await waitForElement(EASY_APPLY_MODAL_SELECTOR, 8_000)
+  const modal = await waitForElement(EASY_APPLY_MODAL_SELECTOR, 8_000, signal)
   if (!modal) {
     console.warn("[SOS] LinkedIn: Easy Apply modal did not appear after clicking button")
     return null
   }
 
   console.log("[SOS] LinkedIn: Easy Apply modal opened successfully")
-  await delay(1_000)
+  await delay(1_000, signal)
   return modal
 }
 
@@ -186,10 +186,11 @@ export async function navigateToApply(
  * LinkedIn's SPA listens for Enter key on the search box to trigger the API call.
  * No page reload — the content script context is preserved.
  */
-export async function navigateToSearchTerm(term: string): Promise<void> {
+export async function navigateToSearchTerm(term: string, signal?: AbortSignal): Promise<void> {
   console.log(`[SOS] LinkedIn: Navigating to search term "${term}"`)
 
-  const input = await waitForElement<HTMLInputElement>(SEARCH_INPUT_SELECTOR, 10_000)
+  const input = await waitForElement<HTMLInputElement>(SEARCH_INPUT_SELECTOR, 10_000, signal)
+  signal?.throwIfAborted()
   if (!input) {
     throw new Error(`[SOS] LinkedIn: Could not find search input to navigate to "${term}"`)
   }
@@ -197,15 +198,15 @@ export async function navigateToSearchTerm(term: string): Promise<void> {
   // Focus the input first (LinkedIn may have focus handlers)
   input.focus()
   input.click()
-  await delay(300)
+  await delay(300, signal)
 
   // Clear existing value
   setReactInputValue(input, "")
-  await delay(100)
+  await delay(100, signal)
 
   // Set the new term using React-aware value setter
   setReactInputValue(input, term)
-  await delay(200)
+  await delay(200, signal)
 
   // Press Enter to submit / trigger LinkedIn's search API call
   input.dispatchEvent(
@@ -220,9 +221,9 @@ export async function navigateToSearchTerm(term: string): Promise<void> {
   )
 
   // Wait for results container to re-render with new content
-  await waitForElement(LINKEDIN_RESULTS_SELECTOR, 15_000)
+  await waitForElement(LINKEDIN_RESULTS_SELECTOR, 15_000, signal)
   // Give LinkedIn extra time to render cards (lazy loading)
-  await delay(2_000)
+  await delay(2_000, signal)
 }
 
 /* ── Navigation: Filters (pushState + popstate) ── */
@@ -232,21 +233,22 @@ export async function navigateToSearchTerm(term: string): Promise<void> {
  * LinkedIn's React router listens for popstate and re-fetches search results
  * with updated URL params. No page reload required.
  */
-export async function applyFiltersViaPushState(site: SiteSettings): Promise<void> {
+export async function applyFiltersViaPushState(site: SiteSettings, signal?: AbortSignal): Promise<void> {
   const url = buildFilterUrl(site)
 
   console.log(`[SOS] LinkedIn: Applying filters via pushState — ${url.search}`)
   pushStateNavigate(url)
 
   // Wait for LinkedIn to process the URL change and re-fetch results
-  await delay(2_500)
+  await delay(2_500, signal)
 }
 
 /* ── DOM-only filter application (post-nav) ── */
 
 async function applyDomFilters(
   site: SiteSettings,
-  clickDelayMs: number
+  clickDelayMs: number,
+  signal?: AbortSignal
 ): Promise<ApplyFiltersResult> {
   const result: ApplyFiltersResult = { success: true, appliedCount: 0, errors: [] }
 
@@ -266,7 +268,8 @@ async function applyDomFilters(
   const allFiltersBtn =
     (await waitForElement(
       "button[aria-label*='All filters'], button.jobs-search-dropdown__trigger--all-filters",
-      6_000
+      6_000,
+      signal
     )) ??
     (() => {
       for (const btn of document.querySelectorAll("button")) {
@@ -282,11 +285,12 @@ async function applyDomFilters(
   }
 
   scrollAndClick(allFiltersBtn)
-  await delay(1_500)
+  await delay(1_500, signal)
 
   const modalContainer = await waitForElement(
     ".jobs-search-all-filters__content, div[data-test-all-filters-modal]",
-    5_000
+    5_000,
+    signal
   )
 
   if (!modalContainer) {
@@ -295,18 +299,19 @@ async function applyDomFilters(
     return result
   }
 
-  result.appliedCount += await toggleCheckboxItems(modalContainer, domFilters, clickDelayMs)
+  result.appliedCount += await toggleCheckboxItems(modalContainer, domFilters, clickDelayMs, signal)
 
   const applyBtn =
     (await waitForElement(
       "button[aria-label*='Show results'], button.jobs-search-all-filters__apply-button",
-      5_000
+      5_000,
+      signal
     )) ??
     findButtonByText(modalContainer, "show results", "apply")
 
   if (applyBtn) {
     scrollAndClick(applyBtn)
-    await delay(1_000)
+    await delay(1_000, signal)
     console.log("[SOS] LinkedIn: Clicked 'Show results' to apply filters")
   } else {
     result.errors.push("Could not find 'Show results' button in filter modal")
@@ -356,23 +361,38 @@ function extractCardLocation(card: HTMLAnchorElement): string {
  * to detect when LinkedIn's lazy-rendered cards become available.
  * Resolves with all matching card elements, or null if timeout.
  */
-async function waitForJobCards(timeoutMs = 15_000): Promise<HTMLAnchorElement[] | null> {
+async function waitForJobCards(timeoutMs = 15_000, signal?: AbortSignal): Promise<HTMLAnchorElement[] | null> {
   // Check if cards are already in DOM
   const existing = document.querySelectorAll<HTMLAnchorElement>(CARD_SELECTOR)
   if (existing.length > 0) return Array.from(existing)
+  if (signal?.aborted) return null
 
   // Wait using MutationObserver for first card to appear
   return new Promise((resolve) => {
+    function onAbort(): void {
+      observer.disconnect()
+      clearTimeout(timer)
+      resolve(null)
+    }
+
     const observer = new MutationObserver(() => {
       const cards = document.querySelectorAll<HTMLAnchorElement>(CARD_SELECTOR)
       if (cards.length > 0) {
         observer.disconnect()
+        if (signal) signal.removeEventListener("abort", onAbort)
+        clearTimeout(timer)
         resolve(Array.from(cards))
       }
     })
     observer.observe(document.body, { childList: true, subtree: true })
-    setTimeout(() => {
+
+    if (signal) {
+      signal.addEventListener("abort", onAbort, { once: true })
+    }
+
+    const timer = setTimeout(() => {
       observer.disconnect()
+      if (signal) signal.removeEventListener("abort", onAbort)
       // One last check — cards might have appeared just before timeout
       const cards = document.querySelectorAll<HTMLAnchorElement>(CARD_SELECTOR)
       resolve(cards.length > 0 ? Array.from(cards) : null)
@@ -386,15 +406,15 @@ async function waitForJobCards(timeoutMs = 15_000): Promise<HTMLAnchorElement[] 
  * preview data (title, company, location, URL) from every card.
  * No card clicking involved — this is a batch pre-screening pass.
  */
-export async function readAllJobPreviews(maxCards: number): Promise<JobPreview[]> {
-  const scroller = await waitForElement(LIST_SCROLLER_SELECTOR, 8_000)
-  if (scroller) {
+export async function readAllJobPreviews(maxCards: number, signal?: AbortSignal): Promise<JobPreview[]> {
+  const scroller = await waitForElement(LIST_SCROLLER_SELECTOR, 8_000, signal)
+  if (scroller && !signal?.aborted) {
     // Scroll to bottom to trigger lazy loading
-    await scrollToBottom(scroller, 10, 400)
-    await delay(1_000)
+    await scrollToBottom(scroller, 10, 400, signal)
+    await delay(1_000, signal)
   }
 
-  const cardLinks = await waitForJobCards(15_000)
+  const cardLinks = await waitForJobCards(15_000, signal)
   if (!cardLinks || cardLinks.length === 0) return []
 
   const limit = Math.min(cardLinks.length, maxCards)
@@ -473,16 +493,17 @@ export function filterJobPreviews(
  * the scraped data for the apply flow.
  */
 async function readJobDescription(
-  job: JobPreview
+  job: JobPreview,
+  signal?: AbortSignal
 ): Promise<{ description: string; detailPanel: Element } | null> {
   // Click the card to load the detail panel
   job.element.scrollIntoView({ behavior: "smooth", block: "center" })
-  await delay(300)
+  await delay(300, signal)
   scrollAndClick(job.element)
-  await delay(1_500)
+  await delay(1_500, signal)
 
   // Wait for the detail panel to appear
-  const detailPanel = await waitForElement(DETAIL_PANEL_SELECTOR, 6_000)
+  const detailPanel = await waitForElement(DETAIL_PANEL_SELECTOR, 6_000, signal)
   if (!detailPanel) {
     console.warn(`[SOS] Detail panel did not load for "${job.title}" @ "${job.company}"`)
     return null
@@ -496,7 +517,7 @@ async function readJobDescription(
   )
   if (showMoreBtn) {
     scrollAndClick(showMoreBtn)
-    await delay(800)
+    await delay(800, signal)
   }
 
   // Scroll the description container to trigger lazy text loading
@@ -507,7 +528,7 @@ async function readJobDescription(
       "article"
   )
   if (descContainer) {
-    await scrollToBottom(descContainer, 15, 400)
+    await scrollToBottom(descContainer, 15, 400, signal)
   }
 
   const description = getVisibleText(descContainer || detailPanel)
@@ -554,7 +575,8 @@ function validateFullJob(
 export async function runLinkedInPipeline(
   site: SiteSettings,
   signal?: AbortSignal,
-  onProgress?: (msg: string) => void
+  onProgress?: (msg: string) => void,
+  onJobStatus?: (jobTitle: string, isValid: boolean) => void
 ): Promise<void> {
   const terms = site.search.searchTerms
   if (terms.length === 0) {
@@ -574,24 +596,26 @@ export async function runLinkedInPipeline(
 
     // ── Step A: Navigate to search term ──
     try {
-      await navigateToSearchTerm(term)
+      await navigateToSearchTerm(term, signal)
     } catch (err) {
+      // If aborted, stop immediately instead of continuing to next term
+      if (err instanceof Error && err.name === "AbortError") throw err
       console.error(`[SOS] Failed to navigate to "${term}":`, err)
       continue
     }
 
     // ── Step B: Apply URL-based filters via pushState ──
-    await applyFiltersViaPushState(site)
-    await delay(1_000)
+    await applyFiltersViaPushState(site, signal)
+    await delay(1_000, signal)
 
     // ── Step C: Apply DOM-only toggles ──
-    const domResult = await applyDomFilters(site, site.pipeline?.pauseBeforeSubmit ? 1200 : 600)
+    const domResult = await applyDomFilters(site, site.pipeline?.pauseBeforeSubmit ? 1200 : 600, signal)
     if (domResult.errors.length > 0) {
       console.warn(`[SOS] DOM filter issues:`, domResult.errors)
     }
 
     // ── Step D: Batch-read all job previews ──
-    const previews = await readAllJobPreviews(maxJobs)
+    const previews = await readAllJobPreviews(maxJobs, signal)
     if (previews.length === 0) {
       onProgress?.(`"${term}": No listings found`)
       console.warn(`[SOS] No job previews for "${term}"`)
@@ -613,6 +637,7 @@ export async function runLinkedInPipeline(
 
     // ── Step F: Drill into each approved job ──
     for (let j = 0; j < approved.length; j++) {
+      signal?.throwIfAborted()
       const job = approved[j]
       onProgress?.(`Reading ${j + 1}/${approved.length}: ${job.title} @ ${job.company}`)
       console.log(
@@ -620,7 +645,7 @@ export async function runLinkedInPipeline(
       )
 
       // Read the full description
-      const detail = await readJobDescription(job)
+      const detail = await readJobDescription(job, signal)
       if (!detail) {
         console.warn(`[SOS] Skipping "${job.title}" — detail panel unavailable`)
         continue
@@ -628,6 +653,8 @@ export async function runLinkedInPipeline(
 
       // Validate the job against ALL user filter criteria
       const isValid = validateFullJob(job, detail.description, site)
+      // Report per-job filter status to the UI widget
+      onJobStatus?.(job.title, isValid)
       if (!isValid) {
         console.log(
           `[SOS] Skipping "${job.title}" @ "${job.company}" — failed filter validation`
@@ -648,7 +675,7 @@ export async function runLinkedInPipeline(
       totalProcessed++
 
       // Give UI a breather between jobs
-      await delay(500)
+      await delay(500, signal)
     }
   }
 

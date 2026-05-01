@@ -115,6 +115,7 @@ export class FloatingWidget {
   /** Update the job status line (shown above the toggle button when running). */
   setJobStatus(jobTitle: string, isValid: boolean): void {
     this.jobStatusLine.textContent = `${jobTitle} — Valid Job: ${isValid ? "Yes" : "No"}`
+    this.jobStatusLine.classList.remove("hidden")
   }
 
   /** Update progress line (shown when running/starting). */
@@ -140,6 +141,7 @@ export class FloatingWidget {
     this.active = false
     this.setState("stopped")
     this.jobStatusLine.textContent = ""
+    this.jobStatusLine.classList.add("hidden")
     this.clearProgress()
     this.clearError()
     this.clearPauseControls()
@@ -154,7 +156,10 @@ export class FloatingWidget {
   /** Transition to paused state with optional message. */
   setPaused(msg?: string): void {
     this.setState("paused")
-    if (msg) this.jobStatusLine.textContent = msg
+    if (msg) {
+      this.jobStatusLine.textContent = msg
+      this.jobStatusLine.classList.remove("hidden")
+    }
     this.showPauseControls()
   }
 
@@ -164,6 +169,7 @@ export class FloatingWidget {
     this.active = false
     this.setState("error")
     this.jobStatusLine.textContent = ""
+    this.jobStatusLine.classList.add("hidden")
     this.clearProgress()
     this.showError(msg)
   }
@@ -261,9 +267,9 @@ export class FloatingWidget {
     this.buildPauseControls()
     this.expandedEl.appendChild(this.pauseControlsEl)
 
-    // ── Job status line ──
+    // ── Job status line (hidden by default, shown when setJobStatus is called) ──
     this.jobStatusLine = document.createElement("div")
-    this.jobStatusLine.className = "sos-job-status"
+    this.jobStatusLine.className = "sos-job-status hidden"
     this.jobStatusLine.textContent = ""
     this.expandedEl.appendChild(this.jobStatusLine)
 
@@ -301,6 +307,7 @@ export class FloatingWidget {
   private handleFromPauseStop(): void {
     this.active = false
     this.jobStatusLine.textContent = ""
+    this.jobStatusLine.classList.add("hidden")
     this.clearProgress()
     this.clearError()
     this.clearPauseControls()
@@ -981,24 +988,34 @@ export class FloatingWidget {
 
   /**
    * Stop triggered by user clicking the toggle button while state = running.
+   * Immediately transitions to stopped state and aborts the pipeline.
    * The pipeline catch block will also call setStopped(), but setStopped()
    * is idempotent so the second call is harmless.
    */
   private handleStop(): void {
     this.options.onStop?.()
-    this.toggleLabel.textContent = "Stopping..."
+    // Immediately show stopped state — no waiting for the pipeline to react
+    this.active = false
+    this.jobStatusLine.textContent = ""
+    this.jobStatusLine.classList.add("hidden")
+    this.clearProgress()
+    this.clearError()
+    this.clearPauseControls()
+    this.setState("stopped")
   }
 
   private handleResume(): void {
     if (this.state !== "paused") return
     this.setState("running")
     this.jobStatusLine.textContent = ""
+    this.jobStatusLine.classList.add("hidden")
     this.options.onResume?.()
   }
 
   private startPipeline(): void {
     this.active = true
     this.jobStatusLine.textContent = ""
+    this.jobStatusLine.classList.add("hidden")
     this.clearValidationErrors()
     this.clearError()
     this.setState("starting")
