@@ -97,9 +97,6 @@ async function handleSiteDetected(presetId: string): Promise<void> {
             abortController.signal,
             (msg) => {
               console.log(`[SOS] ${msg}`)
-            },
-            (jobTitle, isValid) => {
-              widget?.setJobStatus(jobTitle, isValid)
             }
           )
           widget?.setDone()

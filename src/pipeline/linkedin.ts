@@ -575,8 +575,7 @@ function validateFullJob(
 export async function runLinkedInPipeline(
   site: SiteSettings,
   signal?: AbortSignal,
-  onProgress?: (msg: string) => void,
-  onJobStatus?: (jobTitle: string, isValid: boolean) => void
+  onProgress?: (msg: string) => void
 ): Promise<void> {
   const terms = site.search.searchTerms
   if (terms.length === 0) {
@@ -653,8 +652,6 @@ export async function runLinkedInPipeline(
 
       // Validate the job against ALL user filter criteria
       const isValid = validateFullJob(job, detail.description, site)
-      // Report per-job filter status to the UI widget — use the search term being searched
-      onJobStatus?.(term, isValid)
       if (!isValid) {
         console.log(
           `[SOS] Skipping "${job.title}" @ "${job.company}" — failed filter validation`

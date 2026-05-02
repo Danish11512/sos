@@ -74,7 +74,6 @@ export class FloatingWidget {
   private toggleBtn!: HTMLButtonElement
   private toggleDot!: HTMLSpanElement
   private toggleLabel!: HTMLSpanElement
-  private jobStatusLine!: HTMLDivElement
   private progressLine!: HTMLDivElement
   private pauseControlsEl!: HTMLElement
   private navBtn!: HTMLButtonElement
@@ -112,15 +111,6 @@ export class FloatingWidget {
 
   /* ── Public API ── */
 
-  /** Update the job status line (shown above the toggle button when running). */
-  setJobStatus(jobTitle: string, isValid: boolean): void {
-    this.jobStatusLine.textContent = `${jobTitle} ${isValid ? "Yes" : "No"}`
-    this.jobStatusLine.classList.remove("hidden")
-    // Remove both status classes before adding the current one
-    this.jobStatusLine.classList.remove("sos-job-status--yes", "sos-job-status--no")
-    this.jobStatusLine.classList.add(isValid ? "sos-job-status--yes" : "sos-job-status--no")
-  }
-
   /** Update progress line (shown when running/starting). */
   setProgress(msg: string): void {
     this.progressLine.textContent = msg
@@ -143,8 +133,6 @@ export class FloatingWidget {
     if (this.state === "stopped" || this.state === "ready" || this.state === "done") return
     this.active = false
     this.setState("stopped")
-    this.jobStatusLine.textContent = ""
-    this.jobStatusLine.classList.add("hidden")
     this.clearProgress()
     this.clearError()
     this.clearPauseControls()
@@ -164,8 +152,6 @@ export class FloatingWidget {
     if (this.state === "done" || this.state === "stopped" || this.state === "ready") return
     this.active = false
     this.setState("done")
-    this.jobStatusLine.textContent = ""
-    this.jobStatusLine.classList.add("hidden")
     this.clearProgress()
     this.clearError()
     this.clearPauseControls()
@@ -180,10 +166,6 @@ export class FloatingWidget {
   /** Transition to paused state with optional message. */
   setPaused(msg?: string): void {
     this.setState("paused")
-    if (msg) {
-      this.jobStatusLine.textContent = msg
-      this.jobStatusLine.classList.remove("hidden")
-    }
     this.showPauseControls()
   }
 
@@ -192,8 +174,6 @@ export class FloatingWidget {
     this.errMsg = msg
     this.active = false
     this.setState("error")
-    this.jobStatusLine.textContent = ""
-    this.jobStatusLine.classList.add("hidden")
     this.clearProgress()
     this.showError(msg)
   }
@@ -291,12 +271,6 @@ export class FloatingWidget {
     this.buildPauseControls()
     this.expandedEl.appendChild(this.pauseControlsEl)
 
-    // ── Job status line (hidden by default, shown when setJobStatus is called) ──
-    this.jobStatusLine = document.createElement("div")
-    this.jobStatusLine.className = "sos-job-status hidden"
-    this.jobStatusLine.textContent = ""
-    this.expandedEl.appendChild(this.jobStatusLine)
-
     // ── Settings panel ──
     const panel = document.createElement("div")
     panel.className = "sos-panel"
@@ -330,8 +304,6 @@ export class FloatingWidget {
   /* ── Pause-controls stop (from paused state) ── */
   private handleFromPauseStop(): void {
     this.active = false
-    this.jobStatusLine.textContent = ""
-    this.jobStatusLine.classList.add("hidden")
     this.clearProgress()
     this.clearError()
     this.clearPauseControls()
@@ -1027,15 +999,11 @@ export class FloatingWidget {
   private handleResume(): void {
     if (this.state !== "paused") return
     this.setState("running")
-    this.jobStatusLine.textContent = ""
-    this.jobStatusLine.classList.add("hidden")
     this.options.onResume?.()
   }
 
   private startPipeline(): void {
     this.active = true
-    this.jobStatusLine.textContent = ""
-    this.jobStatusLine.classList.add("hidden")
     this.clearValidationErrors()
     this.clearError()
     this.setState("starting")
