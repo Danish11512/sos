@@ -114,8 +114,11 @@ export class FloatingWidget {
 
   /** Update the job status line (shown above the toggle button when running). */
   setJobStatus(jobTitle: string, isValid: boolean): void {
-    this.jobStatusLine.textContent = `${jobTitle} — Valid Job: ${isValid ? "Yes" : "No"}`
+    this.jobStatusLine.textContent = `${jobTitle} ${isValid ? "Yes" : "No"}`
     this.jobStatusLine.classList.remove("hidden")
+    // Remove both status classes before adding the current one
+    this.jobStatusLine.classList.remove("sos-job-status--yes", "sos-job-status--no")
+    this.jobStatusLine.classList.add(isValid ? "sos-job-status--yes" : "sos-job-status--no")
   }
 
   /** Update progress line (shown when running/starting). */
@@ -152,6 +155,27 @@ export class FloatingWidget {
     }, 1500)
 
   }
+
+  /**
+   * Mark pipeline as done (all search terms completed).
+   * Shows "Done ✓" briefly, then auto-transitions to ready.
+   */
+  setDone(): void {
+    if (this.state === "done" || this.state === "stopped" || this.state === "ready") return
+    this.active = false
+    this.setState("done")
+    this.jobStatusLine.textContent = ""
+    this.jobStatusLine.classList.add("hidden")
+    this.clearProgress()
+    this.clearError()
+    this.clearPauseControls()
+    setTimeout(() => {
+      if (this.state === "done") {
+        this.setState("ready")
+      }
+    }, 2000)
+  }
+
 
   /** Transition to paused state with optional message. */
   setPaused(msg?: string): void {
@@ -989,20 +1013,16 @@ export class FloatingWidget {
   /**
    * Stop triggered by user clicking the toggle button while state = running.
    * Immediately transitions to stopped state and aborts the pipeline.
+   * Delegates to setStopped() which handles the auto-transition to ready.
    * The pipeline catch block will also call setStopped(), but setStopped()
    * is idempotent so the second call is harmless.
    */
   private handleStop(): void {
     this.options.onStop?.()
-    // Immediately show stopped state — no waiting for the pipeline to react
-    this.active = false
-    this.jobStatusLine.textContent = ""
-    this.jobStatusLine.classList.add("hidden")
-    this.clearProgress()
-    this.clearError()
-    this.clearPauseControls()
-    this.setState("stopped")
+    this.setStopped()
   }
+
+
 
   private handleResume(): void {
     if (this.state !== "paused") return

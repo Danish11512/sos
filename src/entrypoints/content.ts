@@ -102,7 +102,8 @@ async function handleSiteDetected(presetId: string): Promise<void> {
               widget?.setJobStatus(jobTitle, isValid)
             }
           )
-          widget?.setState("done")
+          widget?.setDone()
+
         } catch (err: unknown) {
           if (err instanceof Error && err.name === "AbortError") {
             console.log("[SOS] LinkedIn pipeline aborted by user")
@@ -224,8 +225,10 @@ async function runLegacyPipelineCycle(): Promise<void> {
     console.log("[SOS] Legacy pipeline complete")
     state.running = false
     await browser.storage.local.set({ [PIPELINE_KEY]: state })
+    widget?.setDone()
     return
   }
+
 
   // Save updated state, then navigate to next term
   await browser.storage.local.set({ [PIPELINE_KEY]: state })

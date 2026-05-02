@@ -307,14 +307,33 @@
 
 /* ===== Job status line (shown per-job during running) ===== */
 .sos-job-status {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  display: none;
+}
+
+.sos-job-status.hidden {
+  display: none;
+}
+
+.sos-job-status--yes {
+  display: block;
   padding: 0 16px 4px;
   background: #e8f5e9;
-  font-size: 11px;
   color: #1e8e3e;
-  font-weight: 500;
   border-bottom: 1px solid #c8e6c9;
-  line-height: 1.4;
 }
+
+.sos-job-status--no {
+  display: block;
+  padding: 0 16px 4px;
+  background: #ffebee;
+  color: #d93025;
+  border-bottom: 1px solid #ffcdd2;
+}
+
+
 
 @keyframes sos-pulse {
   0%, 100% { opacity: 1; }
