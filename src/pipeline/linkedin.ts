@@ -22,6 +22,7 @@
 
 import type { SiteSettings, FilterSettings } from "../settings/sections"
 import type { ApplyFiltersResult, ApplyToJobResult, JobPreview } from "./types"
+import type { ModalResult } from "./modal-result"
 import {
   checkCompanyBadWords,
   checkTitleBadWords,
@@ -61,6 +62,8 @@ import {
   SORT_MAP,
   FILTER_URL_PARAMS,
 } from "./linkedin-constants"
+
+import { fillEasyApplyModal, detectExternalApply } from "./easy-apply-modal"
 
 
 
@@ -139,47 +142,64 @@ export async function clickEasyApplyButton(
 ): Promise<Element | null> {
   signal?.throwIfAborted()
 
-  // Find the Easy Apply button inside the detail panel
-  const applyBtn =
-    detailPanel.querySelector<HTMLElement>(EASY_APPLY_BUTTON_SELECTOR) ??
-    (() => {
-      // Fallback: scan all buttons in detail panel for text match
-      for (const btn of detailPanel.querySelectorAll("button")) {
-        const text = btn.textContent?.trim().toLowerCase() || ""
-        if (text.includes("easy apply") || text.includes("apply now") || text === "apply") {
-          return btn
+  // Retry up to 3 times to find and click the Easy Apply button
+  const MAX_RETRIES = 3
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    signal?.throwIfAborted()
+
+    // Find the Easy Apply button inside the detail panel
+    const applyBtn =
+      detailPanel.querySelector<HTMLElement>(EASY_APPLY_BUTTON_SELECTOR) ??
+      (() => {
+        // Fallback: scan all buttons in detail panel for text match
+        for (const btn of detailPanel.querySelectorAll("button")) {
+          const text = btn.textContent?.trim().toLowerCase() || ""
+          if (text.includes("easy apply") || text.includes("apply now") || text === "apply") {
+            return btn
+          }
         }
+        return null
+      })()
+
+    if (!applyBtn) {
+      // Check if this is an external apply (redirects off LinkedIn)
+      const externalBtn = detailPanel.querySelector<HTMLAnchorElement>(EXTERNAL_APPLY_SELECTOR)
+
+      if (externalBtn) {
+        console.log("[SOS] LinkedIn: Found external apply link — navigating away")
+        window.location.href = externalBtn.href
+        return null
       }
-      return null
-    })()
 
-  if (!applyBtn) {
-    // Check if this is an external apply (redirects off LinkedIn)
-    const externalBtn = detailPanel.querySelector<HTMLAnchorElement>(EXTERNAL_APPLY_SELECTOR)
+      if (attempt < MAX_RETRIES) {
+        console.warn(`[SOS] LinkedIn: Could not find Easy Apply button (attempt ${attempt}/${MAX_RETRIES}) — retrying`)
+        await delay(1_000, signal)
+        continue
+      }
 
-    if (externalBtn) {
-      console.log("[SOS] LinkedIn: Found external apply link — navigating away")
-      window.location.href = externalBtn.href
+      console.warn("[SOS] LinkedIn: Could not find Easy Apply button in detail panel after 3 attempts")
       return null
     }
 
-    console.warn("[SOS] LinkedIn: Could not find Easy Apply button in detail panel")
-    return null
+    console.log(`[SOS] LinkedIn: Clicking Easy Apply button (attempt ${attempt}/${MAX_RETRIES})`)
+    scrollAndClick(applyBtn)
+
+    // Wait for the apply modal to appear
+    const modal = await waitForElement(EASY_APPLY_MODAL_SELECTOR, 8_000, signal)
+    if (modal) {
+      console.log("[SOS] LinkedIn: Easy Apply modal opened successfully")
+      await delay(1_000, signal)
+      return modal
+    }
+
+    if (attempt < MAX_RETRIES) {
+      console.warn(`[SOS] LinkedIn: Easy Apply modal did not appear (attempt ${attempt}/${MAX_RETRIES}) — retrying`)
+      await delay(1_000, signal)
+    }
   }
 
-  console.log("[SOS] LinkedIn: Clicking Easy Apply button")
-  scrollAndClick(applyBtn)
-
-  // Wait for the apply modal to appear
-  const modal = await waitForElement(EASY_APPLY_MODAL_SELECTOR, 8_000, signal)
-  if (!modal) {
-    console.warn("[SOS] LinkedIn: Easy Apply modal did not appear after clicking button")
-    return null
-  }
-
-  console.log("[SOS] LinkedIn: Easy Apply modal opened successfully")
-  await delay(1_000, signal)
-  return modal
+  console.warn("[SOS] LinkedIn: Easy Apply modal did not appear after 3 attempts")
+  return null
 }
 
 /* ── Easy Apply: Close modal ── */
@@ -255,33 +275,37 @@ export function closeEasyApplyModal(): boolean {
   return gone
 }
 
-/* ── Easy Apply: Validate + click (combined) ── */
+/* ── Easy Apply: Validate + fill modal (combined) ── */
 
 /**
- * Apply to a job: validate against ALL user filter criteria, then click the
- * Easy Apply button only if the job passes every check.
+ * Apply to a job: validate against ALL user filter criteria, then open the
+ * Easy Apply modal and fill/submit it automatically.
  *
  * This is the primary function to call once a job's detail panel is loaded
  * and its description has been read. It composes:
  *   1. `validateJobForApplication()` — pure filter checks
  *   2. `clickEasyApplyButton()` — DOM interaction to open the modal
+ *   3. `fillEasyApplyModal()` — full modal interaction engine
  *
- * @param job        - The job preview (title, company used for validation)
- * @param description- Full job description text (for description-level filters)
- * @param filters    - User's FilterSettings from the extension config
- * @param detailPanel- The detail panel element containing the Easy Apply button
- * @param signal     - Optional AbortSignal for cancellation
+ * @param job         - The job preview (title, company used for validation)
+ * @param description - Full job description text (for description-level filters)
+ * @param filters     - User's FilterSettings from the extension config
+ * @param detailPanel - The detail panel element containing the Easy Apply button
+ * @param signal      - Optional AbortSignal for cancellation
+ * @param site        - Full site settings (for modal filling)
+ * @param onProgress  - Optional progress callback
  *
- * @returns `ApplyToJobResult` with `applied: true` if the job passed all
- *          criteria and the Easy Apply button was clicked, or `applied: false`
- *          with a `reason` explaining why.
+ * @returns `ApplyToJobResult` with `applied: true` if the job was successfully
+ *          applied to, or `applied: false` with a `reason` explaining why.
  */
 export async function applyToJob(
   job: JobPreview,
   description: string,
   filters: FilterSettings,
   detailPanel: Element,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  site?: SiteSettings,
+  onProgress?: (msg: string) => void
 ): Promise<ApplyToJobResult> {
   signal?.throwIfAborted()
 
@@ -307,7 +331,19 @@ export async function applyToJob(
     `[SOS] Job "${job.title}" @ "${job.company}" passed all criteria — clicking Easy Apply`
   )
 
-  // Step 2: Click the Easy Apply button (only reached if validation passed)
+  // Step 2: Check for external apply (skip if easyApplyOnly)
+  if (filters.easyApplyOnly) {
+    const externalUrl = detectExternalApply(detailPanel)
+    if (externalUrl) {
+      console.log(`[SOS] Skipping "${job.title}" — external apply and easyApplyOnly is enabled`)
+      return {
+        applied: false,
+        reason: `External apply (easyApplyOnly enabled): "${job.title}" @ "${job.company}"`,
+      }
+    }
+  }
+
+  // Step 3: Click the Easy Apply button (only reached if validation passed)
   const modal = await clickEasyApplyButton(detailPanel, signal)
 
   if (!modal) {
@@ -317,9 +353,51 @@ export async function applyToJob(
     }
   }
 
+  // Step 4: Fill and submit the modal (if site settings provided)
+  if (site) {
+    onProgress?.(`Filling application for ${job.title} @ ${job.company}...`)
+    const modalResult: ModalResult = await fillEasyApplyModal(
+      modal,
+      site,
+      signal,
+      onProgress
+    )
+
+    switch (modalResult.status) {
+      case "success":
+        console.log(`[SOS] LinkedIn: ${modalResult.reason}`)
+        return {
+          applied: true,
+          reason: `Applied to "${job.title}" @ "${job.company}"`,
+        }
+
+      case "dailyLimitReached":
+        console.warn(`[SOS] LinkedIn: ${modalResult.reason}`)
+        return {
+          applied: false,
+          reason: `Daily limit reached: "${job.title}" @ "${job.company}"`,
+        }
+
+      case "failed":
+        console.warn(`[SOS] LinkedIn: ${modalResult.reason}`)
+        return {
+          applied: false,
+          reason: `Failed: ${modalResult.reason} for "${job.title}" @ "${job.company}"`,
+        }
+
+      case "skipped":
+        console.log(`[SOS] LinkedIn: ${modalResult.reason}`)
+        return {
+          applied: false,
+          reason: `Skipped: ${modalResult.reason} for "${job.title}" @ "${job.company}"`,
+        }
+    }
+  }
+
+  // If no site settings provided, just return that the modal was opened
   return {
     applied: true,
-    reason: `Applied to "${job.title}" @ "${job.company}"`,
+    reason: `Modal opened for "${job.title}" @ "${job.company}"`,
   }
 }
 
@@ -811,19 +889,39 @@ export async function runLinkedInPipeline(
         continue
       }
 
-      // ── Step G: Apply to job (validate + click Easy Apply + close modal) ──
+      // ── Step G: Apply to job (validate + open modal + fill + submit) ──
       onProgress?.(`Applying to ${j + 1}/${approved.length}: ${job.title} @ ${job.company}`)
-      const result = await applyToJob(job, detail.description, site.filters, detail.detailPanel, signal)
+      const result = await applyToJob(
+        job,
+        detail.description,
+        site.filters,
+        detail.detailPanel,
+        signal,
+        site, // Pass full site settings for modal filling
+        onProgress
+      )
 
       if (result.applied) {
-        // Wait for the modal to fully render, then close it
-        await delay(2_000, signal)
-        closeEasyApplyModal()
-        await delay(1_000, signal)
         console.log(`[SOS] LinkedIn: ${result.reason}`)
         totalProcessed++
+
+        // Close the modal after successful submission
+        await delay(1_000, signal)
+        closeEasyApplyModal()
+        await delay(500, signal)
       } else {
         console.log(`[SOS] LinkedIn: ${result.reason}`)
+
+        // Check if daily limit was reached — stop the pipeline
+        if (result.reason.includes("Daily limit reached")) {
+          console.warn("[SOS] LinkedIn: Stopping pipeline due to daily limit")
+          onProgress?.("Daily Easy Apply limit reached — stopping pipeline")
+          return
+        }
+
+        // Close modal if it's still open (failed application)
+        closeEasyApplyModal()
+        await delay(500, signal)
       }
 
       // Give UI a breather between jobs

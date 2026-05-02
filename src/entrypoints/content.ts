@@ -100,12 +100,29 @@ async function createWidget(presetId: string): Promise<void> {
     widget?.setProgress(`Paused: "${data.jobTitle}" @ "${data.company}" — click Resume to apply`)
   })
 
+  // Subscribe to pause-for-help from modal engine (stuck on a question)
+  const unsubPauseHelp = eventBus.on("pause-for-help", (data) => {
+    widget?.setState("paused")
+    widget?.setProgress(
+      `Help needed: "${data.questionLabel}" (${data.questionType}) — answer in modal then click Resume`
+    )
+  })
+
+  // Subscribe to daily-limit-reached from modal engine
+  const unsubDailyLimit = eventBus.on("daily-limit-reached", () => {
+    abortController?.abort()
+    widget?.setProgress("Daily Easy Apply limit reached — try again tomorrow")
+    widget?.setDone()
+  })
+
   // Override destroy to clean up event subscriptions
   const origDestroy = widget.destroy.bind(widget)
   widget.destroy = () => {
     unsubStop()
     unsubResume()
     unsubPause()
+    unsubPauseHelp()
+    unsubDailyLimit()
     origDestroy()
   }
 }

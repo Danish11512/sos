@@ -28,6 +28,8 @@ export interface EventMap {
   "pipeline-error": { message: string; siteId: string }
   "pipeline-done": { siteId: string }
   "url-changed": { url: string }
+  "pause-for-help": { siteId: string; questionLabel: string; questionType: string }
+  "daily-limit-reached": { siteId: string }
 }
 
 export type EventKey = keyof EventMap

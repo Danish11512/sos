@@ -51,6 +51,10 @@ export class SettingsManager {
     await saveSettings(this._data)
   }
 
+  getGlobal(): GlobalSettings {
+    return this._data.global
+  }
+
   getSite(siteId: string): SiteSettings {
     if (!this._data.perSite[siteId]) {
       this._data.perSite[siteId] = structuredClone(DEFAULT_SITE)
