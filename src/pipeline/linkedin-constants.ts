@@ -59,7 +59,16 @@ export const EASY_APPLY_MODAL_SELECTOR =
   "div.artdeco-modal-layer--default, " +
   "div[data-easy-apply-modal]"
 
+/** Selector for the Easy Apply modal close/dismiss button (X). */
+export const EASY_APPLY_CLOSE_SELECTOR =
+  "button[aria-label*='Dismiss'], " +
+  "button[aria-label*='Close'], " +
+  "button.artdeco-modal__dismiss, " +
+  "button.jobs-easy-apply-modal__close-btn, " +
+  ".artdeco-modal__dismiss"
+
 /** LinkedIn jobs search page URL. */
+
 export const LINKEDIN_JOBS_SEARCH_URL = "https://www.linkedin.com/jobs/search/"
 
 /** URL path fragment that identifies a search results page. */

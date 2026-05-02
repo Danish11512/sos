@@ -20,8 +20,8 @@
  *   f_AL=true (easy apply)
  */
 
-import type { SiteSettings } from "../settings/sections"
-import type { ApplyFiltersResult, JobPreview } from "./types"
+import type { SiteSettings, FilterSettings } from "../settings/sections"
+import type { ApplyFiltersResult, ApplyToJobResult, JobPreview } from "./types"
 import {
   checkCompanyBadWords,
   checkTitleBadWords,
@@ -40,6 +40,8 @@ import {
   setReactInputValue,
 } from "../utils/dom"
 
+import { eventBus } from "../utils/event-bus"
+
 import {
   SEARCH_INPUT_SELECTOR,
   LINKEDIN_RESULTS_SELECTOR,
@@ -49,6 +51,7 @@ import {
   EASY_APPLY_BUTTON_SELECTOR,
   EXTERNAL_APPLY_SELECTOR,
   EASY_APPLY_MODAL_SELECTOR,
+  EASY_APPLY_CLOSE_SELECTOR,
   LINKEDIN_JOBS_SEARCH_URL,
   SEARCH_PAGE_PATH,
   DATE_POSTED_MAP,
@@ -58,6 +61,7 @@ import {
   SORT_MAP,
   FILTER_URL_PARAMS,
 } from "./linkedin-constants"
+
 
 
 /* ── Filtered URL params helper (for pushState updates) ── */
@@ -120,17 +124,16 @@ export function navigateToSearchPage(): void {
   window.location.href = LINKEDIN_JOBS_SEARCH_URL
 }
 
-/* ── Navigation: Easy Apply modal ── */
-
+/* ── Easy Apply: Click button ── */
 
 /**
  * Click the Easy Apply button in the job detail panel and wait for the
  * apply modal to appear.
  *
+ * Call this only after all job criteria pass validation.
  * Returns the modal element if found, null otherwise.
- * Throws if the Easy Apply button cannot be found.
  */
-export async function navigateToApply(
+export async function clickEasyApplyButton(
   detailPanel: Element,
   signal?: AbortSignal
 ): Promise<Element | null> {
@@ -179,7 +182,149 @@ export async function navigateToApply(
   return modal
 }
 
+/* ── Easy Apply: Close modal ── */
+
+/**
+ * Close the Easy Apply modal by trying up to 3 strategies:
+ *   1. Click the X / Dismiss button via CSS selector
+ *   2. Press Escape key (catches React-backed modals)
+ *   3. DOM-level removal: find the modal backdrop/overlay and remove
+ *      from the DOM entirely (nuclear option for stubborn modals)
+ *
+ * Call after Easy Apply submission complete (or skipped) to dismiss
+ * the modal and return to the job detail panel so pipeline can continue.
+ *
+ * Returns `true` if close action performed, `false` otherwise.
+ */
+export function closeEasyApplyModal(): boolean {
+  // Strategy 1: Click the X / Dismiss button via CSS selector
+  const closeBtn = document.querySelector<HTMLElement>(EASY_APPLY_CLOSE_SELECTOR)
+  if (closeBtn) {
+    console.log("[SOS] LinkedIn: Clicking Easy Apply modal close button (strategy 1)")
+    scrollAndClick(closeBtn)
+    return true
+  }
+
+  // Strategy 2: Press Escape to dismiss (triggers React-backed listeners)
+  document.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "Escape",
+      code: "Escape",
+      keyCode: 27,
+      which: 27,
+      bubbles: true,
+      cancelable: true,
+    })
+  )
+  console.log("[SOS] LinkedIn: Dispatched Escape key to dismiss modal (strategy 2)")
+
+  // Wait briefly for React to process Escape event
+  // If modal still in DOM after Escape, proceed to strategy 3
+  const modalStillPresent = document.querySelector(EASY_APPLY_MODAL_SELECTOR)
+  if (!modalStillPresent) return true
+
+  // Strategy 3: DOM-level removal — remove modal + backdrop from DOM
+  // Nuclear option for modals that refuse normal close.
+  console.log("[SOS] LinkedIn: Modal still present — removing from DOM (strategy 3)")
+
+  // Remove all modal layers
+  const modalSelector = [
+    EASY_APPLY_MODAL_SELECTOR,
+    ".artdeco-modal-layer",
+  ]
+  for (const sel of modalSelector) {
+    document.querySelectorAll(sel).forEach((m) => {
+      m.remove()
+      console.log("[SOS] LinkedIn: Removed modal element:", sel)
+    })
+  }
+
+  // Remove backdrops / overlays
+  document.querySelectorAll(
+    ".artdeco-modal-overlay, " +
+    ".artdeco-modal-backdrop, " +
+    "div[data-test-modal-overlay]"
+  ).forEach((b) => b.remove())
+
+  // Restore body scroll (LinkedIn disables scroll when modal open)
+  document.body.style.overflow = ""
+  document.body.style.position = ""
+
+  const gone = !document.querySelector(EASY_APPLY_MODAL_SELECTOR)
+  if (gone) console.log("[SOS] LinkedIn: Modal successfully removed from DOM")
+  return gone
+}
+
+/* ── Easy Apply: Validate + click (combined) ── */
+
+/**
+ * Apply to a job: validate against ALL user filter criteria, then click the
+ * Easy Apply button only if the job passes every check.
+ *
+ * This is the primary function to call once a job's detail panel is loaded
+ * and its description has been read. It composes:
+ *   1. `validateJobForApplication()` — pure filter checks
+ *   2. `clickEasyApplyButton()` — DOM interaction to open the modal
+ *
+ * @param job        - The job preview (title, company used for validation)
+ * @param description- Full job description text (for description-level filters)
+ * @param filters    - User's FilterSettings from the extension config
+ * @param detailPanel- The detail panel element containing the Easy Apply button
+ * @param signal     - Optional AbortSignal for cancellation
+ *
+ * @returns `ApplyToJobResult` with `applied: true` if the job passed all
+ *          criteria and the Easy Apply button was clicked, or `applied: false`
+ *          with a `reason` explaining why.
+ */
+export async function applyToJob(
+  job: JobPreview,
+  description: string,
+  filters: FilterSettings,
+  detailPanel: Element,
+  signal?: AbortSignal
+): Promise<ApplyToJobResult> {
+  signal?.throwIfAborted()
+
+  // Step 1: Validate the job against ALL user filter criteria
+  const isValid = validateJobForApplication(
+    job.company,
+    job.title,
+    description,
+    filters
+  )
+
+  if (!isValid) {
+    console.log(
+      `[SOS] Skipping "${job.title}" @ "${job.company}" — failed filter validation`
+    )
+    return {
+      applied: false,
+      reason: `Failed filter validation: "${job.title}" @ "${job.company}"`,
+    }
+  }
+
+  console.log(
+    `[SOS] Job "${job.title}" @ "${job.company}" passed all criteria — clicking Easy Apply`
+  )
+
+  // Step 2: Click the Easy Apply button (only reached if validation passed)
+  const modal = await clickEasyApplyButton(detailPanel, signal)
+
+  if (!modal) {
+    return {
+      applied: false,
+      reason: `Easy Apply button not found or modal did not appear for "${job.title}" @ "${job.company}"`,
+    }
+  }
+
+  return {
+    applied: true,
+    reason: `Applied to "${job.title}" @ "${job.company}"`,
+  }
+}
+
 /* ── Navigation: Search Term (DOM input manipulation) ── */
+
 
 /**
  * Navigate to a new search term via DOM manipulation of the LinkedIn search input.
@@ -322,38 +467,74 @@ async function applyDomFilters(
 
 /* ── Batch job card reading ── */
 
-/** Extract title from a LinkedIn job card (handles multiple card formats). */
+/** Extract title from a LinkedIn job card (handles multiple card formats).
+ *  The card anchor itself often IS the title element (e.g. a.job-card-list__title),
+ *  so we fall back to the anchor's own textContent if no child match is found.
+ *  Strips trailing ` @ CompanyName` or ` · CompanyName` from the raw text
+ *  since LinkedIn sometimes includes the company in the anchor's textContent. */
 function extractCardTitle(card: HTMLAnchorElement): string {
-  return (
+  const raw =
     card.querySelector(
       ".job-card-list__title, " +
         ".job-card-container__link, " +
         ".artdeco-entity-lockup__title, " +
         ".job-card-container__primary-description"
-    )?.textContent?.trim() || ""
-  )
+    )?.textContent?.trim() ||
+    card.textContent?.trim() ||
+    ""
+
+  // Strip trailing " @ CompanyName" or " · CompanyName" patterns
+  return raw.replace(/[ @·]+\S.*$/, "").trim()
 }
 
-/** Extract company name from a LinkedIn job card. */
+/** Extract company name from a LinkedIn job card.
+ *  Looks at the card's parent container for company name elements,
+ *  since the card anchor itself may not contain the company name. */
 function extractCardCompany(card: HTMLAnchorElement): string {
-  return (
-    card.querySelector(
+  // Try the card element first
+  const fromCard = card.querySelector(
+    ".job-card-container__company-name, " +
+      ".artdeco-entity-lockup__subtitle, " +
+      ".job-card-list__company-name"
+  )?.textContent?.trim()
+  if (fromCard) return fromCard
+
+  // Try the parent container (the list item wrapping the card)
+  const parent = card.closest("li, div, .job-card-container, .jobs-search-results__list-item")
+  if (parent) {
+    const fromParent = parent.querySelector<HTMLElement>(
       ".job-card-container__company-name, " +
         ".artdeco-entity-lockup__subtitle, " +
-        ".job-card-list__company-name"
-    )?.textContent?.trim() || ""
-  )
+        ".job-card-list__company-name, " +
+        ".artdeco-entity-lockup__caption"
+    )?.textContent?.trim()
+    if (fromParent) return fromParent
+  }
+
+  return ""
 }
 
-/** Extract location from a LinkedIn job card. */
+/** Extract location from a LinkedIn job card.
+ *  Falls back to the parent container if not found on the card itself. */
 function extractCardLocation(card: HTMLAnchorElement): string {
-  return (
-    card.querySelector(
+  const fromCard = card.querySelector(
+    ".job-card-container__metadata-item, " +
+      ".artdeco-entity-lockup__caption, " +
+      ".job-card-list__metadata-item"
+  )?.textContent?.trim()
+  if (fromCard) return fromCard
+
+  const parent = card.closest("li, div, .job-card-container, .jobs-search-results__list-item")
+  if (parent) {
+    const fromParent = parent.querySelector<HTMLElement>(
       ".job-card-container__metadata-item, " +
         ".artdeco-entity-lockup__caption, " +
         ".job-card-list__metadata-item"
-    )?.textContent?.trim() || ""
-  )
+    )?.textContent?.trim()
+    if (fromParent) return fromParent
+  }
+
+  return ""
 }
 
 /**
@@ -536,26 +717,6 @@ async function readJobDescription(
   return { description, detailPanel }
 }
 
-/**
- * Validate a job against ALL description-level filters using the shared
- * pure functions from `job-validator.ts`.
- *
- * Returns `true` if the job passes all filters and is ready to apply to.
- */
-function validateFullJob(
-  job: JobPreview,
-  description: string,
-  site: SiteSettings
-): boolean {
-  return validateJobForApplication(
-    job.company,
-    job.title,
-    description,
-    site.filters
-  )
-}
-
-
 /* ── Main pipeline entry ── */
 
 /**
@@ -570,7 +731,7 @@ function validateFullJob(
  *      c. Apply DOM-only toggles via "All filters" modal
  *      d. Batch-read all job card previews from the list view
  *      e. Pre-screen previews using company/title word filters
- *      f. For each approved job: click → read description → apply flow
+ *      f. For each approved job: click → read description → validate → apply flow
  */
 export async function runLinkedInPipeline(
   site: SiteSettings,
@@ -650,26 +811,20 @@ export async function runLinkedInPipeline(
         continue
       }
 
-      // Validate the job against ALL user filter criteria
-      const isValid = validateFullJob(job, detail.description, site)
-      if (!isValid) {
-        console.log(
-          `[SOS] Skipping "${job.title}" @ "${job.company}" — failed filter validation`
-        )
-        continue
+      // ── Step G: Apply to job (validate + click Easy Apply + close modal) ──
+      onProgress?.(`Applying to ${j + 1}/${approved.length}: ${job.title} @ ${job.company}`)
+      const result = await applyToJob(job, detail.description, site.filters, detail.detailPanel, signal)
+
+      if (result.applied) {
+        // Wait for the modal to fully render, then close it
+        await delay(2_000, signal)
+        closeEasyApplyModal()
+        await delay(1_000, signal)
+        console.log(`[SOS] LinkedIn: ${result.reason}`)
+        totalProcessed++
+      } else {
+        console.log(`[SOS] LinkedIn: ${result.reason}`)
       }
-
-      // If there's a pauseAfterFilters, stop and let user review
-      if (site.filters.pauseAfterFilters) {
-        onProgress?.(`Paused: "${job.title}" @ "${job.company}" — review in detail panel`)
-        console.log(`[SOS] Paused after filters — "${job.title}" ready for review`)
-        // The widget is still visible; user can resume or the pipeline
-        // will continue when the user interacts again
-        // TODO: Wire this into a widget "resume" mechanism
-      }
-
-
-      totalProcessed++
 
       // Give UI a breather between jobs
       await delay(500, signal)

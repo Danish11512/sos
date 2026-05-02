@@ -94,12 +94,18 @@ async function createWidget(presetId: string): Promise<void> {
   const unsubResume = eventBus.on("resume-requested", () => {
     widget?.setState("running")
   })
+  // Subscribe to pause-requested from pipeline (pauseAfterFilters)
+  const unsubPause = eventBus.on("pause-requested", (data) => {
+    widget?.setState("paused")
+    widget?.setProgress(`Paused: "${data.jobTitle}" @ "${data.company}" — click Resume to apply`)
+  })
 
   // Override destroy to clean up event subscriptions
   const origDestroy = widget.destroy.bind(widget)
   widget.destroy = () => {
     unsubStop()
     unsubResume()
+    unsubPause()
     origDestroy()
   }
 }

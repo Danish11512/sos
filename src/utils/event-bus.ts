@@ -22,6 +22,7 @@ export interface EventMap {
   "settings-changed": { settings: AppSettings }
   "pipeline-progress": { message: string; siteId: string }
   "stop-requested": { siteId: string }
+  "pause-requested": { siteId: string; jobTitle: string; company: string }
   "resume-requested": { siteId: string }
   "start-requested": { siteId: string }
   "pipeline-error": { message: string; siteId: string }

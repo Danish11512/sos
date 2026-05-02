@@ -5,6 +5,17 @@ export interface ApplyFiltersResult {
   errors: string[]
 }
 
+/**
+ * Result of attempting to apply to a job after validation.
+ * - `applied: true` — job passed all filters and Easy Apply was clicked
+ * - `applied: false` — job was rejected by filters or Easy Apply button not found
+ * - `reason` — human-readable explanation of the outcome
+ */
+export interface ApplyToJobResult {
+  applied: boolean
+  reason: string
+}
+
 /** Scraped data from a single job listing (full detail panel read) */
 export interface JobListingData {
   title: string
