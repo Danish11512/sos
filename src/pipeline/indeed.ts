@@ -33,11 +33,11 @@ export async function applyIndeedExtraFilters(
   const clickDelay = options?.clickDelayMs ?? 600
 
   const filterItems = [
-    { enabled: site.filters.easyApplyOnly, label: "Easy Apply" },
     { enabled: site.filters.under10Applicants, label: "Under 10 applicants" },
     { enabled: site.filters.inYourNetwork, label: "In your network" },
     { enabled: site.filters.fairChanceEmployer, label: "Fair chance employer" },
   ]
+
 
   if (!filterItems.some((f) => f.enabled)) {
     console.log("[SOS] Indeed: No DOM-only filters to apply")

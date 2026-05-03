@@ -183,53 +183,193 @@ export async function scrollToBottom(
 }
 
 /**
- * Wait for DOM to stabilize — observe mutations until no changes for a given quiet period.
- * FIX F9/F15: Replace fixed delays with DOM-stability-based waits.
+ * Wait for a predicate to return true, checking on every DOM mutation.
+ * Uses MutationObserver on the given container (or document.body).
+ * Resolves when predicate returns true, or when timeout is reached (throws).
+ *
+ * This is the core primitive that replaces all time-based delay() calls
+ * and waitForStableDOM(). Instead of waiting for a fixed time, we wait
+ * for a specific condition to be met, checking on every DOM mutation.
+ *
+ * @param predicate  - Function that returns true when the condition is met
+ * @param options    - Optional configuration
+ * @returns Promise that resolves when predicate returns true
+ * @throws Error if timeout is reached before predicate returns true
  */
-export async function waitForStableDOM(
-  container: Element = document.body,
-  quietMs = 1_000,
-  timeoutMs = 10_000,
-  signal?: AbortSignal
+export async function waitForCondition(
+  predicate: () => boolean,
+  options?: {
+    container?: Element
+    timeoutMs?: number
+    signal?: AbortSignal
+    /** If true, also check on a short interval for cases where DOM doesn't change but state does */
+    pollIntervalMs?: number
+  }
 ): Promise<void> {
-  return new Promise((resolve) => {
-    if (signal?.aborted) { resolve(); return }
+  const { container = document.body, timeoutMs = 10_000, signal, pollIntervalMs } = options || {}
 
-    let timer: ReturnType<typeof setTimeout>
+  // Fast path: already true
+  if (predicate()) return
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError")
+
+  return new Promise<void>((resolve, reject) => {
+    let pollTimer: ReturnType<typeof setInterval> | undefined
+    let timeoutTimer: ReturnType<typeof setTimeout>
+
     const observer = new MutationObserver(() => {
-      clearTimeout(timer)
-      timer = setTimeout(() => {
-        observer.disconnect()
-        if (signal) signal.removeEventListener("abort", onAbort)
+      if (predicate()) {
+        cleanup()
         resolve()
-      }, quietMs)
+      }
     })
 
-    function onAbort(): void {
-      clearTimeout(timer)
+    function cleanup(): void {
       observer.disconnect()
-      resolve()
+      clearTimeout(timeoutTimer)
+      if (pollTimer) clearInterval(pollTimer)
+      if (signal) signal.removeEventListener("abort", onAbort)
     }
 
-    observer.observe(container, { childList: true, subtree: true, attributes: false })
+    function onAbort(): void {
+      cleanup()
+      reject(new DOMException("Aborted", "AbortError"))
+    }
+
+    observer.observe(container, { childList: true, subtree: true, attributes: true, characterData: true })
 
     if (signal) {
       signal.addEventListener("abort", onAbort, { once: true })
     }
 
-    // Fallback timeout
-    setTimeout(() => {
-      observer.disconnect()
-      if (signal) signal.removeEventListener("abort", onAbort)
-      resolve()
-    }, timeoutMs)
+    // Optional polling for cases where DOM mutations don't fire (e.g., React state changes)
+    if (pollIntervalMs && pollIntervalMs > 0) {
+      pollTimer = setInterval(() => {
+        if (predicate()) {
+          cleanup()
+          resolve()
+        }
+      }, pollIntervalMs)
+    }
 
-    // Initial timer
+    timeoutTimer = setTimeout(() => {
+      observer.disconnect()
+      if (pollTimer) clearInterval(pollTimer)
+      if (signal) signal.removeEventListener("abort", onAbort)
+      reject(new Error(`waitForCondition timed out after ${timeoutMs}ms`))
+    }, timeoutMs)
+  })
+}
+
+/**
+ * Wait for new child elements matching a selector to appear in a container.
+ * Uses MutationObserver to detect when new cards/elements are added.
+ * Resolves with the new total count of matching elements.
+ *
+ * Useful for scroll-based lazy loading: scroll, then wait for new items.
+ *
+ * @param container     - The container element to observe
+ * @param existingCount - The number of matching elements already present
+ * @param options       - Optional configuration
+ * @returns The new total count of matching elements
+ */
+export async function waitForNewElements(
+  container: Element,
+  existingCount: number,
+  options?: {
+    selector?: string
+    timeoutMs?: number
+    signal?: AbortSignal
+  }
+): Promise<number> {
+  const { selector = "*", timeoutMs = 5_000, signal } = options || {}
+
+  // Fast path: already have new elements
+  const current = container.querySelectorAll(selector).length
+  if (current > existingCount) return current
+  if (signal?.aborted) return existingCount
+
+  return new Promise<number>((resolve) => {
+    let timer: ReturnType<typeof setTimeout>
+
+    const observer = new MutationObserver(() => {
+      const count = container.querySelectorAll(selector).length
+      if (count > existingCount) {
+        observer.disconnect()
+        clearTimeout(timer)
+        if (signal) signal.removeEventListener("abort", onAbort)
+        resolve(count)
+      }
+    })
+
+    function onAbort(): void {
+      observer.disconnect()
+      clearTimeout(timer)
+      resolve(container.querySelectorAll(selector).length)
+    }
+
+    observer.observe(container, { childList: true, subtree: true })
+
+    if (signal) {
+      signal.addEventListener("abort", onAbort, { once: true })
+    }
+
     timer = setTimeout(() => {
       observer.disconnect()
       if (signal) signal.removeEventListener("abort", onAbort)
-      resolve()
-    }, quietMs)
+      resolve(container.querySelectorAll(selector).length)
+    }, timeoutMs)
+  })
+}
+
+/**
+ * Wait for an element's text content to reach a minimum length.
+ * Useful for waiting for descriptions to fully load.
+ */
+export async function waitForTextContent(
+  selector: string,
+  minLength: number,
+  options?: {
+    timeoutMs?: number
+    signal?: AbortSignal
+  }
+): Promise<Element | null> {
+  const { timeoutMs = 10_000, signal } = options || {}
+
+  const el = document.querySelector(selector)
+  if (el && (el.textContent || "").trim().length >= minLength) return el
+  if (signal?.aborted) return null
+
+  return new Promise<Element | null>((resolve) => {
+    let timer: ReturnType<typeof setTimeout>
+
+    const observer = new MutationObserver(() => {
+      const element = document.querySelector(selector)
+      if (element && (element.textContent || "").trim().length >= minLength) {
+        observer.disconnect()
+        clearTimeout(timer)
+        if (signal) signal.removeEventListener("abort", onAbort)
+        resolve(element)
+      }
+    })
+
+    function onAbort(): void {
+      observer.disconnect()
+      clearTimeout(timer)
+      resolve(null)
+    }
+
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+
+    if (signal) {
+      signal.addEventListener("abort", onAbort, { once: true })
+    }
+
+    timer = setTimeout(() => {
+      observer.disconnect()
+      if (signal) signal.removeEventListener("abort", onAbort)
+      const element = document.querySelector(selector)
+      resolve(element && (element.textContent || "").trim().length >= minLength ? element : null)
+    }, timeoutMs)
   })
 }
 

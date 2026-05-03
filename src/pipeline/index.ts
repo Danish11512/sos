@@ -30,8 +30,10 @@ export async function runPipeline(siteId: string): Promise<ApplyFiltersResult> {
 
   switch (siteId) {
     case "linkedin":
-      await runLinkedInPipeline(site)
+      // Legacy runPipeline entry — LinkedIn now uses the widget-based flow in content.ts
+      console.warn("[SOS] runPipeline called for LinkedIn — use content.ts widget flow instead")
       return { success: true, appliedCount: 0, errors: [] }
+
     case "indeed":
       return runIndeedPipeline(site)
     default:

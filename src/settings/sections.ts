@@ -76,21 +76,19 @@ export class SearchSection extends SettingsSection<SearchSettings> {
 /* ── Filters (per-site) ── */
 
 export interface FilterSettings {
-  sortBy: string; datePosted: string; salary: string; easyApplyOnly: boolean
+  sortBy: string; datePosted: string; salary: string
   experienceLevel: string[]; jobType: string[]; onSite: string[]
   under10Applicants: boolean; inYourNetwork: boolean; fairChanceEmployer: boolean
   companies: string[]
-  pauseAfterFilters: boolean
   aboutCompanyBadWords: string[]; aboutCompanyGoodWords: string[]; badWords: string[]
   securityClearance: boolean; didMasters: boolean; currentExperience: number
 }
 
 export const DEFAULT_FILTERS: FilterSettings = {
-  sortBy: "", datePosted: "", salary: "", easyApplyOnly: true,
+  sortBy: "", datePosted: "", salary: "",
   experienceLevel: [], jobType: [], onSite: [],
   under10Applicants: false, inYourNetwork: false, fairChanceEmployer: false,
   companies: [],
-  pauseAfterFilters: false,
   aboutCompanyBadWords: [], aboutCompanyGoodWords: [], badWords: [],
   securityClearance: false, didMasters: false, currentExperience: -1,
 }
