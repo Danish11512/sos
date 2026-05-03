@@ -90,7 +90,7 @@ export const DEFAULT_FILTERS: FilterSettings = {
   experienceLevel: [], jobType: [], onSite: [],
   under10Applicants: false, inYourNetwork: false, fairChanceEmployer: false,
   companies: [],
-  pauseAfterFilters: true,
+  pauseAfterFilters: false,
   aboutCompanyBadWords: [], aboutCompanyGoodWords: [], badWords: [],
   securityClearance: false, didMasters: false, currentExperience: -1,
 }

@@ -532,11 +532,24 @@ async function clickSubmitApplication(
  * Handle the "Save draft?" modal that appears when discarding mid-application.
  * Clicks "Discard" to exit cleanly.
  * FIX F61: Try Escape key first before looking for save draft modal.
+ * FIX F83: Fix save draft modal detection — use more specific selectors
+ *          and handle the case where the discard button is in a nested modal layer.
  */
-function discardApplication(): boolean {
+export function discardApplication(): boolean {
   // FIX F61: Try Escape key first to dismiss any open modal
   document.dispatchEvent(
     new KeyboardEvent("keydown", {
+      key: "Escape",
+      code: "Escape",
+      keyCode: 27,
+      which: 27,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    })
+  )
+  document.dispatchEvent(
+    new KeyboardEvent("keyup", {
       key: "Escape",
       code: "Escape",
       keyCode: 27,
@@ -551,14 +564,34 @@ function discardApplication(): boolean {
   const modalStillPresent = document.querySelector(EASY_APPLY_MODAL_SELECTOR)
   if (!modalStillPresent) return true
 
-  // Check for save draft modal
+  // FIX F83: Look for save draft modal with more specific selectors
+  // The save draft modal is typically a separate dialog layered on top
   const saveModal = document.querySelector(
-    ".artdeco-modal--layer, " +
+    // FIX F83: Use more specific selectors — avoid matching the main modal itself
     "div[data-test-save-draft-modal], " +
-    "div[role='dialog']"
+    ".artdeco-modal--layer:not(.jobs-easy-apply-modal) div[role='dialog'], " +
+    ".artdeco-modal-layer:not(.jobs-easy-apply-modal) div[role='dialog'], " +
+    "div[role='alertdialog']"
   )
 
   if (!saveModal) {
+    // FIX F83: Fallback — scan all visible dialogs for save/discard text
+    const allDialogs = document.querySelectorAll<HTMLElement>(
+      "div[role='dialog'], .artdeco-modal, .artdeco-modal--layer"
+    )
+    for (const dialog of allDialogs) {
+      // Skip the main easy apply modal itself
+      if (dialog.matches(EASY_APPLY_MODAL_SELECTOR)) continue
+      const text = dialog.textContent?.toLowerCase() || ""
+      if (text.includes("save") && (text.includes("draft") || text.includes("application"))) {
+        const discardBtn = findButtonByText(dialog, "discard", "delete", "don't save", "no")
+        if (discardBtn) {
+          scrollAndClick(discardBtn)
+          return true
+        }
+      }
+    }
+    // No save draft modal found — modal is likely already dismissed
     return true
   }
 
@@ -586,6 +619,7 @@ function discardApplication(): boolean {
 
   return false
 }
+
 
 
 /* ── Follow company checkbox ── */

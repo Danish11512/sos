@@ -101,8 +101,15 @@ interface PipelinePersistedState {
  *
  * FIX F11: Always start from clean base URL. Only carry forward keywords, location, geoId.
  * FIX F16: Preserve keywords, location, geoId from current URL.
+ * FIX F81: Set location from site.search.searchLocation if not already in URL.
+ * FIX F85: Accept optional keywords param to ensure keywords are preserved even if
+ *          LinkedIn's SPA hasn't updated the URL yet after DOM-based search navigation.
  */
-function buildFilterUrl(site: SiteSettings): URL {
+function buildFilterUrl(
+  site: SiteSettings,
+  overrides?: { datePosted?: string; sortBy?: string },
+  explicitKeywords?: string
+): URL {
   // FIX F11: Start from clean base URL
   const url = new URL(LINKEDIN_JOBS_SEARCH_URL)
 
@@ -113,17 +120,26 @@ function buildFilterUrl(site: SiteSettings): URL {
     if (val) url.searchParams.set(key, val)
   }
 
+  // FIX F85: If explicit keywords provided (from the search term we just navigated to),
+  // use them to ensure keywords are preserved even if LinkedIn's SPA hasn't updated the URL yet.
+  if (explicitKeywords) {
+    url.searchParams.set("keywords", explicitKeywords)
+  }
+
   // Remove previous SOS filter params (clean slate)
   for (const key of FILTER_URL_PARAMS) {
     url.searchParams.delete(key)
   }
 
-  // Sort
-  const sortVal = SORT_MAP[site.filters.sortBy.trim().toLowerCase()]
+
+  // Sort (use override if provided, otherwise from settings)
+  const sortKey = overrides?.sortBy ?? site.filters.sortBy
+  const sortVal = SORT_MAP[sortKey.trim().toLowerCase()]
   if (sortVal) url.searchParams.set("f_SB2", sortVal)
 
-  // Date posted
-  const dateVal = DATE_POSTED_MAP[site.filters.datePosted.trim().toLowerCase()]
+  // Date posted (use override if provided, otherwise from settings)
+  const dateKey = overrides?.datePosted ?? site.filters.datePosted
+  const dateVal = DATE_POSTED_MAP[dateKey.trim().toLowerCase()]
   if (dateVal) url.searchParams.set("f_TPR", dateVal)
 
   // Experience level
@@ -187,12 +203,33 @@ export function navigateToSearchPage(): void {
  * FIX F47: External apply opens in new tab instead of full redirect.
  * FIX F48: More specific modal selector.
  * FIX F49: Exponential backoff for retries.
+ * FIX F87: Detect already-applied state and skip job early.
+ * FIX F88: Don't open external apply in new tab — just skip the job.
  */
 export async function clickEasyApplyButton(
   detailPanel: Element,
   signal?: AbortSignal
 ): Promise<Element | null> {
   signal?.throwIfAborted()
+
+  // FIX F87: Check if the job has already been applied to.
+  // LinkedIn shows "Applied" or "Applied X day ago" instead of the Easy Apply button.
+  // Detect this early to avoid retries and wasted time.
+  const allButtons = detailPanel.querySelectorAll("button")
+  for (const btn of allButtons) {
+    const text = btn.textContent?.trim().toLowerCase() || ""
+    if (text.includes("applied") || text.includes("submitted") || text.includes("withdrawn")) {
+      console.log(`[SOS] LinkedIn: Job already applied to — button text: "${text}"`)
+      return null
+    }
+  }
+
+  // FIX F88: Check for external apply link early and skip without opening a new tab.
+  const externalBtn = detailPanel.querySelector<HTMLAnchorElement>(EXTERNAL_APPLY_SELECTOR)
+  if (externalBtn) {
+    console.log("[SOS] LinkedIn: Found external apply link — skipping job (no new tab)")
+    return null
+  }
 
   // FIX F49: Exponential backoff (1s, 2s, 4s)
   const RETRY_DELAYS = [1_000, 2_000, 4_000]
@@ -206,7 +243,7 @@ export async function clickEasyApplyButton(
         // Fallback: scan all buttons in detail panel for text match
         for (const btn of detailPanel.querySelectorAll("button")) {
           const text = btn.textContent?.trim().toLowerCase() || ""
-          // FIX F46: Negative checks
+          // FIX F46: Negative checks — skip already-applied buttons
           const negativeIndicators = ["applied", "submitted", "withdrawn"]
           if (negativeIndicators.some((neg) => text.includes(neg))) continue
           if (text.includes("easy apply") || text.includes("apply now") || text === "apply") {
@@ -217,16 +254,6 @@ export async function clickEasyApplyButton(
       })()
 
     if (!applyBtn) {
-      // Check if this is an external apply (redirects off LinkedIn)
-      const externalBtn = detailPanel.querySelector<HTMLAnchorElement>(EXTERNAL_APPLY_SELECTOR)
-
-      if (externalBtn) {
-        console.log("[SOS] LinkedIn: Found external apply link — opening in new tab")
-        // FIX F47: Open external links in new tab instead of navigating away
-        window.open(externalBtn.href, "_blank")
-        return null
-      }
-
       if (attempt < RETRY_DELAYS.length) {
         console.warn(`[SOS] LinkedIn: Could not find Easy Apply button (attempt ${attempt}/${RETRY_DELAYS.length}) — retrying`)
         await delay(RETRY_DELAYS[attempt - 1], signal)
@@ -236,6 +263,7 @@ export async function clickEasyApplyButton(
       console.warn(`[SOS] LinkedIn: Could not find Easy Apply button in detail panel after ${RETRY_DELAYS.length} attempts`)
       return null
     }
+
 
     console.log(`[SOS] LinkedIn: Clicking Easy Apply button (attempt ${attempt}/${RETRY_DELAYS.length})`)
     scrollAndClick(applyBtn)
@@ -283,8 +311,9 @@ export async function clickEasyApplyButton(
  * FIX F64: After DOM removal, trigger React re-render.
  * FIX F65: Restore body scroll from snapshot.
  * FIX F67: Check if modal is still in DOM before attempting to close.
+ * FIX F82: Add delay after each strategy for React to process events.
  */
-export function closeEasyApplyModal(): boolean {
+export async function closeEasyApplyModal(): Promise<boolean> {
   // FIX F67: Check if modal is still in DOM
   const modal = document.querySelector(EASY_APPLY_MODAL_SELECTOR)
   if (!modal) {
@@ -310,45 +339,67 @@ export function closeEasyApplyModal(): boolean {
   if (closeBtn) {
     console.log("[SOS] LinkedIn: Clicking Easy Apply modal close button (strategy 1)")
     scrollAndClick(closeBtn)
-    // Check if modal actually closed
+    // FIX F82: Wait for React to process the click before checking
+    await delay(500)
     if (!document.querySelector(EASY_APPLY_MODAL_SELECTOR)) return true
   }
 
   // Strategy 2: Press Escape to dismiss (triggers React-backed listeners)
   // FIX F63: Use dispatchEscapeKey with composed: true
+  // FIX F82: Dispatch both keydown and keyup for React compatibility
   dispatchEscapeKey()
+  document.dispatchEvent(
+    new KeyboardEvent("keyup", {
+      key: "Escape",
+      code: "Escape",
+      keyCode: 27,
+      which: 27,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    })
+  )
   console.log("[SOS] LinkedIn: Dispatched Escape key to dismiss modal (strategy 2)")
 
-  // Wait briefly for React to process Escape event
+  // FIX F82: Wait for React to process Escape event before checking
+  await delay(500)
   const modalStillPresent = document.querySelector(EASY_APPLY_MODAL_SELECTOR)
   if (!modalStillPresent) return true
 
+
   // Strategy 3: DOM-level removal — remove modal + backdrop from DOM
   // Nuclear option for modals that refuse normal close.
+  // FIX F86: Only remove the Easy Apply modal itself and its direct overlay,
+  // NOT the .artdeco-modal-layer which LinkedIn uses for scroll management.
+  // Removing the layer breaks scroll on the job list and description panels.
   console.log("[SOS] LinkedIn: Modal still present — removing from DOM (strategy 3)")
 
-  // Remove all modal layers
-  const modalSelector = [
-    EASY_APPLY_MODAL_SELECTOR,
-    ".artdeco-modal-layer",
-  ]
-  for (const sel of modalSelector) {
-    document.querySelectorAll(sel).forEach((m) => {
-      m.remove()
-      console.log("[SOS] LinkedIn: Removed modal element:", sel)
-    })
+  // Remove only the Easy Apply modal itself (not the layer/overlay which LinkedIn
+  // uses for scroll management). The modal is the inner content container.
+  const easyApplyModal = document.querySelector(EASY_APPLY_MODAL_SELECTOR)
+  if (easyApplyModal) {
+    easyApplyModal.remove()
+    console.log("[SOS] LinkedIn: Removed Easy Apply modal element")
   }
 
-  // Remove backdrops / overlays
+  // Remove the modal backdrop/overlay that LinkedIn adds when modal is open.
+  // Be specific — only remove the overlay that's directly related to the modal,
+  // not the general .artdeco-modal-layer which is the scroll container.
   document.querySelectorAll(
     ".artdeco-modal-overlay, " +
     ".artdeco-modal-backdrop, " +
     "div[data-test-modal-overlay]"
   ).forEach((b) => b.remove())
 
-  // FIX F65: Restore body scroll from snapshot
-  document.body.style.overflow = originalBodyOverflow
-  document.body.style.position = originalBodyPosition
+  // FIX F86: Do NOT restore body overflow/position — LinkedIn manages these
+  // internally via React state. Restoring them can break LinkedIn's scroll
+  // containers. Instead, let LinkedIn's React handle cleanup naturally.
+  // Only restore if LinkedIn didn't clean up (e.g., body still has overflow:hidden
+  // from the modal that we just removed).
+  if (document.body.style.overflow === "hidden" || document.body.style.position === "fixed") {
+    document.body.style.overflow = originalBodyOverflow
+    document.body.style.position = originalBodyPosition
+  }
 
   // FIX F64: Trigger React re-render by dispatching click on detail panel
   const detailPanel = document.querySelector(DETAIL_PANEL_SELECTOR)
@@ -359,6 +410,7 @@ export function closeEasyApplyModal(): boolean {
   const gone = !document.querySelector(EASY_APPLY_MODAL_SELECTOR)
   if (gone) console.log("[SOS] LinkedIn: Modal successfully removed from DOM")
   return gone
+
 }
 
 /* ── Easy Apply: Validate + fill modal (combined) ── */
@@ -583,9 +635,17 @@ export async function navigateToSearchTerm(term: string, signal?: AbortSignal): 
  *
  * FIX F13: pushStateNavigate now also dispatches hashchange.
  * FIX F15: Replace fixed 2.5s delay with waitForStableDOM.
+ * FIX F85: Pass current search term as explicitKeywords to ensure keywords
+ *          are preserved even if LinkedIn's SPA hasn't updated the URL yet.
  */
-export async function applyFiltersViaPushState(site: SiteSettings, signal?: AbortSignal): Promise<void> {
-  const url = buildFilterUrl(site)
+export async function applyFiltersViaPushState(
+  site: SiteSettings,
+  signal?: AbortSignal,
+  overrides?: { datePosted?: string; sortBy?: string },
+  currentSearchTerm?: string
+): Promise<void> {
+  const url = buildFilterUrl(site, overrides, currentSearchTerm)
+
 
   console.log(`[SOS] LinkedIn: Applying filters via pushState — ${url.search}`)
   pushStateNavigate(url)
@@ -1057,24 +1117,24 @@ export async function runLinkedInPipeline(
   let sortToggle = persistedState?.sortToggle ?? false
   let dateCycleIndex = persistedState?.dateCycleIndex ?? 0
 
-  // FIX F71: Cycle date posted filter
+  // FIX F71: Cycle date posted filter — compute override without mutating frozen site
+  let datePostedOverride: string | undefined
   if (filters.datePosted && DATE_POSTED_VALUES.includes(DATE_POSTED_MAP[filters.datePosted.trim().toLowerCase()] || "")) {
-    // Use the cycled value
     const cycledDate = DATE_POSTED_VALUES[dateCycleIndex % DATE_POSTED_VALUES.length]
-    // Override the filter for this run
     const dateKey = Object.entries(DATE_POSTED_MAP).find(([, v]) => v === cycledDate)?.[0]
     if (dateKey) {
-      site.filters.datePosted = dateKey
+      datePostedOverride = dateKey
       console.log(`[SOS] LinkedIn: Cycling date posted to "${dateKey}" (${cycledDate})`)
     }
   }
 
-  // FIX F70: Alternate sort order
+  // FIX F70: Alternate sort order — compute override without mutating frozen site
+  let sortByOverride: string | undefined
   if (filters.sortBy) {
     const sortVal = SORT_VALUES[sortToggle ? 1 : 0]
     const sortKey = Object.entries(SORT_MAP).find(([, v]) => v === sortVal)?.[0]
     if (sortKey) {
-      site.filters.sortBy = sortKey
+      sortByOverride = sortKey
       console.log(`[SOS] LinkedIn: Alternating sort to "${sortKey}" (${sortVal})`)
     }
   }
@@ -1084,7 +1144,23 @@ export async function runLinkedInPipeline(
   navigateToSearchPage()
   await delay(2_000, signal)
 
+  // FIX F81: Set location from settings if configured.
+  // Do this via pushState so LinkedIn's SPA picks it up before we start
+  // processing search terms. This ensures the location is in the URL when
+  // buildFilterUrl() preserves it from the current URL.
+  const searchLocation = site.search.searchLocation?.trim()
+  if (searchLocation) {
+    const currentUrl = new URL(window.location.href)
+    if (!currentUrl.searchParams.get("location")) {
+      currentUrl.searchParams.set("location", searchLocation)
+      console.log(`[SOS] LinkedIn: Setting search location to "${searchLocation}"`)
+      pushStateNavigate(currentUrl)
+      await delay(1_500, signal)
+    }
+  }
+
   // Process each search term
+
   for (let termIdx = 0; termIdx < shuffledTerms.length; termIdx++) {
     signal?.throwIfAborted()
 
@@ -1109,10 +1185,13 @@ export async function runLinkedInPipeline(
       continue
     }
 
-    // Step 2: Apply URL-based filters via pushState
+    // Step 2: Apply URL-based filters via pushState (with date/sort overrides)
+    // FIX F85: Pass current search term to ensure keywords are preserved in the URL
+    // even if LinkedIn's SPA hasn't updated the URL yet after DOM-based search navigation.
     onProgress?.(`Applying filters for "${term}"...`)
     try {
-      await applyFiltersViaPushState(site, signal)
+      await applyFiltersViaPushState(site, signal, { datePosted: datePostedOverride, sortBy: sortByOverride }, term)
+
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       console.error(`[SOS] LinkedIn: Failed to apply filters for "${term}": ${msg}`)
@@ -1131,15 +1210,10 @@ export async function runLinkedInPipeline(
       console.warn(`[SOS] LinkedIn: DOM filter application failed: ${msg}`)
     }
 
-    // FIX F74: Pause after applying filters (if configured)
+    // FIX F74: Pause after applying filters (time-based delay using clickDelayMs)
     if (pauseAfterFilters) {
-      onProgress?.(`Filters applied for "${term}" — click Resume to continue`)
-      console.log(`[SOS] LinkedIn: Pausing after filters for "${term}"`)
-      const resumed = await waitForResume(signal)
-      if (!resumed) {
-        console.log("[SOS] LinkedIn: User stopped pipeline during pause")
-        return
-      }
+      console.log(`[SOS] LinkedIn: Pausing ${clickDelayMs}ms after filters for "${term}"`)
+      await delay(clickDelayMs, signal)
     }
 
     // Step 4: Read all job card previews
@@ -1241,9 +1315,10 @@ export async function runLinkedInPipeline(
       const modalStillOpen = document.querySelector(EASY_APPLY_MODAL_SELECTOR)
       if (modalStillOpen) {
         console.warn("[SOS] LinkedIn: Modal still open after job — closing")
-        closeEasyApplyModal()
+        await closeEasyApplyModal()
         await delay(1_000, signal)
       }
+
 
       // FIX F66: Rate limiting — random delay between jobs
       await randomDelay(2_000, 5_000, signal)

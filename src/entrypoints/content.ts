@@ -17,6 +17,9 @@ import { loadSettings } from "../utils/storage"
 import { isOnSearchResultsPage, applyPostNavFilters, captureJobs } from "../pipeline/index"
 import { runLinkedInPipeline, navigateToSearchPage } from "../pipeline/linkedin"
 
+import { discardApplication } from "../pipeline/easy-apply-modal"
+
+
 let widget: FloatingWidget | null = null
 let widgetInitializedUrl = ""
 let abortController: AbortController | null = null
@@ -79,8 +82,15 @@ async function createWidget(presetId: string): Promise<void> {
             widget?.setError(msg)
           }
         } finally {
+          // FIX F84: Ensure modal is discarded when pipeline stops for any reason
+          try {
+            discardApplication()
+          } catch (e) {
+            console.warn("[SOS] Error discarding application in finally:", e)
+          }
           abortController = null
         }
+
       } else {
         startLegacyPipeline(presetId)
       }
@@ -88,9 +98,17 @@ async function createWidget(presetId: string): Promise<void> {
   })
 
   // Subscribe to stop-requested from widget (pause-stop, toggle while running)
+  // FIX F84: Discard the application modal when stopping the pipeline
   const unsubStop = eventBus.on("stop-requested", () => {
     abortController?.abort()
+    // Try to discard any open Easy Apply modal
+    try {
+      discardApplication()
+    } catch (e) {
+      console.warn("[SOS] Error discarding application on stop:", e)
+    }
   })
+
   const unsubResume = eventBus.on("resume-requested", () => {
     widget?.setState("running")
   })
