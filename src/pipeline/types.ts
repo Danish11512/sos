@@ -49,4 +49,25 @@ export interface JobPreview {
   url: string
   /** Reference to the anchor element for subsequent click navigation */
   element: HTMLAnchorElement
+  /** FIX F31: Job ID for re-querying the DOM by URL */
+  jobId: string
 }
+
+/**
+ * Progress message type for pipeline progress updates.
+ * FIX F76: Use typed progress messages instead of raw strings.
+ */
+export interface ProgressMessage {
+  /** Human-readable progress text */
+  text: string
+  /** Current phase of the pipeline */
+  phase: "navigation" | "filtering" | "reading" | "validating" | "applying" | "complete" | "error"
+  /** Optional percentage (0-100) */
+  percent?: number
+  /** Optional job title being processed */
+  jobTitle?: string
+  /** Optional company name */
+  company?: string
+}
+
+

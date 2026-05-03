@@ -125,13 +125,16 @@ export interface PipelineSettings {
   pauseBeforeSubmit: boolean; pauseAtFailedQuestion: boolean; overwritePreviousAnswers: boolean
   closeTabs: boolean; followCompanies: boolean; runNonStop: boolean; runInBackground: boolean
   alternateSortby: boolean; cycleDatePosted: boolean; stopDateCycleAt24hr: boolean
+  clickDelayMs: number
 }
 
 export const DEFAULT_PIPELINE: PipelineSettings = {
   pauseBeforeSubmit: true, pauseAtFailedQuestion: true, overwritePreviousAnswers: false,
   closeTabs: false, followCompanies: false, runNonStop: false, runInBackground: false,
   alternateSortby: true, cycleDatePosted: true, stopDateCycleAt24hr: true,
+  clickDelayMs: 500,
 }
+
 
 export class PipelineSection extends SettingsSection<PipelineSettings> {
   readonly defaults = DEFAULT_PIPELINE

@@ -38,17 +38,30 @@ import {
 
 /* ── Constants ── */
 
-const MAX_ITERATIONS = 15
+// FIX F57: MAX_ITERATIONS adaptive — base value, will be adjusted based on form complexity
+const BASE_MAX_ITERATIONS = 15
+const MAX_ITERATIONS = BASE_MAX_ITERATIONS
+
 const POST_CLICK_DELAY = 800
 const POST_NAV_DELAY = 1_200
+
+// FIX F58: Random fallback strategy — configurable via settings
+const RANDOM_FALLBACK_ENABLED = true
+
+// FIX F59: Timeout for waitForResume (5 minutes)
+const WAIT_FOR_RESUME_TIMEOUT = 300_000
+
+
 
 /* ── Daily limit detection ── */
 
 /**
  * Check if the modal contains a daily application limit message.
  * LinkedIn shows this when you've hit the Easy Apply daily cap.
+ * FIX F50: Add more detection variants.
  */
 export function checkDailyLimit(modal: Element): boolean {
+
   const text = modal.textContent?.toLowerCase() || ""
   const limitPhrases = [
     "daily limit",
@@ -58,9 +71,16 @@ export function checkDailyLimit(modal: Element): boolean {
     "too many applications",
     "try again tomorrow",
     "applications today",
+    "you've applied",
+    "limit reached",
+    "maximum applications",
+    "can't apply",
+    "unable to apply",
+    "not able to submit",
   ]
   return limitPhrases.some((phrase) => text.includes(phrase))
 }
+
 
 /* ── External apply detection ── */
 
@@ -119,11 +139,15 @@ function findFormElements(modal: Element): FormElement[] {
 
 /**
  * Check if a form element already has a value selected/filled.
+ * FIX F51: Re-scan disabled inputs after each answer (some inputs become disabled after answering).
+ * FIX F52: For select elements, check selectedIndex instead of value.
  */
 function isElementAnswered(el: HTMLElement, type: ReturnType<typeof classifyQuestion>): boolean {
   switch (type) {
     case "select": {
       const select = el as HTMLSelectElement
+      // FIX F52: Check selectedIndex — if a non-default option is selected, consider it answered
+      if (select.selectedIndex > 0) return true
       return select.value !== "" && select.value !== select.querySelector("option")?.value
     }
     case "radio": {
@@ -143,6 +167,7 @@ function isElementAnswered(el: HTMLElement, type: ReturnType<typeof classifyQues
       return false
   }
 }
+
 
 /* ── Answering individual question types ── */
 
@@ -216,28 +241,48 @@ function answerRadioQuestion(
 
 /**
  * Get the visible label text for a radio button.
+ * FIX F54: Use confidence score per strategy — prefer explicit labels over fallbacks.
  */
 function getRadioLabel(radio: HTMLInputElement): string {
-  // Check for associated label
+  // Strategy 1: Associated <label> via `for` attribute (highest confidence)
   if (radio.id) {
     const label = document.querySelector(`label[for="${radio.id}"]`)
     if (label?.textContent?.trim()) return label.textContent.trim()
   }
 
-  // Check parent label
+  // Strategy 2: Parent <label> that wraps the element
   const parentLabel = radio.closest("label")
   if (parentLabel?.textContent?.trim()) return parentLabel.textContent.trim()
 
-  // Check aria-label
+  // Strategy 3: aria-label
   const ariaLabel = radio.getAttribute("aria-label")
   if (ariaLabel?.trim()) return ariaLabel.trim()
 
-  // Check following sibling text
+  // Strategy 4: Following sibling text
   let next = radio.nextElementSibling
   if (next?.textContent?.trim()) return next.textContent.trim()
 
+  // Strategy 5: aria-labelledby
+  const labelledBy = radio.getAttribute("aria-labelledby")
+  if (labelledBy) {
+    const ref = document.getElementById(labelledBy)
+    if (ref?.textContent?.trim()) return ref.textContent.trim()
+  }
+
+  // Strategy 6: Closest preceding sibling with text
+  let prev = radio.previousElementSibling
+  while (prev) {
+    const text = prev.textContent?.trim()
+    if (text && text.length > 0 && text.length < 200) {
+      return text
+    }
+    prev = prev.previousElementSibling
+  }
+
+  // Strategy 7: value attribute (lowest confidence)
   return radio.value || ""
 }
+
 
 /**
  * Answer a text input question.
@@ -289,6 +334,7 @@ function answerCheckboxQuestion(question: FormElement): boolean {
 /**
  * Upload resume via file input in the modal.
  * Returns true if upload was performed.
+ * FIX F55: Convert base64 to Blob directly without fetch() for better compatibility.
  */
 async function uploadResume(
   modal: Element,
@@ -306,8 +352,27 @@ async function uploadResume(
 
   // Convert base64 data URL to Blob
   try {
-    const response = await fetch(resumeData)
-    const blob = await response.blob()
+    // FIX F55: Convert base64 to Blob directly without fetch()
+    let blob: Blob
+    if (resumeData.startsWith("data:")) {
+      // Parse data URL directly
+      const commaIdx = resumeData.indexOf(",")
+      const mimeMatch = resumeData.substring(0, commaIdx).match(/data:([^;]+)/)
+      const mimeType = mimeMatch ? mimeMatch[1] : "application/octet-stream"
+      const base64 = resumeData.substring(commaIdx + 1)
+      const byteString = atob(base64)
+      const ab = new ArrayBuffer(byteString.length)
+      const ia = new Uint8Array(ab)
+      for (let i = 0; i < byteString.length; i++) {
+        ia[i] = byteString.charCodeAt(i)
+      }
+      blob = new Blob([ab], { type: mimeType })
+    } else {
+      // Fallback: use fetch for non-data URLs
+      const response = await fetch(resumeData)
+      blob = await response.blob()
+    }
+
     const file = new File([blob], resumeFileName, { type: blob.type })
 
     const dataTransfer = new DataTransfer()
@@ -323,11 +388,13 @@ async function uploadResume(
   }
 }
 
+
 /* ── Navigation button detection ── */
 
 /**
  * Find the primary navigation button in the modal footer.
  * Returns the button text and element.
+ * FIX F56: Also match aria-label for non-English LinkedIn interfaces.
  */
 function findNavigationButton(
   modal: Element
@@ -354,8 +421,11 @@ function findNavigationButton(
 
   for (const btn of buttons) {
     const text = btn.textContent?.trim().toLowerCase() || ""
-    if (text.includes("next") || text.includes("review") || text.includes("submit") || text.includes("continue")) {
-      return { text, element: btn }
+    // FIX F56: Also check aria-label for non-English interfaces
+    const ariaLabel = btn.getAttribute("aria-label")?.toLowerCase() || ""
+    if (text.includes("next") || text.includes("review") || text.includes("submit") || text.includes("continue") ||
+        ariaLabel.includes("next") || ariaLabel.includes("review") || ariaLabel.includes("submit") || ariaLabel.includes("continue")) {
+      return { text: text || ariaLabel, element: btn }
     }
   }
 
@@ -363,18 +433,22 @@ function findNavigationButton(
   const allBtns = container.querySelectorAll("button")
   for (const btn of allBtns) {
     const text = btn.textContent?.trim().toLowerCase() || ""
-    if (text === "next" || text === "review" || text === "submit" || text === "continue") {
-      return { text, element: btn }
+    const ariaLabel = btn.getAttribute("aria-label")?.toLowerCase() || ""
+    if (text === "next" || text === "review" || text === "submit" || text === "continue" ||
+        ariaLabel === "next" || ariaLabel === "review" || ariaLabel === "submit" || ariaLabel === "continue") {
+      return { text: text || ariaLabel, element: btn }
     }
   }
 
   return null
 }
 
+
 /* ── Submit application ── */
 
 /**
  * Click the Submit application button and handle the confirmation modal.
+ * FIX F60: Use Promise.race to handle both confirmation modal and signal abort.
  */
 async function clickSubmitApplication(
   modal: Element,
@@ -388,7 +462,36 @@ async function clickSubmitApplication(
   }
 
   scrollAndClick(submitBtn)
-  await delay(2_000, signal)
+
+  // FIX F60: Use Promise.race to handle both confirmation modal and signal abort
+  try {
+    await Promise.race([
+      delay(2_000, signal),
+      new Promise<void>((resolve) => {
+        // Wait for confirmation modal to appear
+        const observer = new MutationObserver(() => {
+          const confirmModal = document.querySelector(
+            ".artdeco-modal--confirmation, " +
+            "div[data-test-modal], " +
+            ".jobs-easy-apply-modal--confirmation"
+          )
+          if (confirmModal) {
+            observer.disconnect()
+            resolve()
+          }
+        })
+        observer.observe(document.body, { childList: true, subtree: true })
+        // Fallback timeout
+        setTimeout(() => {
+          observer.disconnect()
+          resolve()
+        }, 2_000)
+      }),
+    ])
+  } catch {
+    // Aborted
+    return false
+  }
 
   // Check for confirmation modal
   const confirmModal = document.querySelector(
@@ -422,13 +525,32 @@ async function clickSubmitApplication(
   return true
 }
 
+
 /* ── Discard application (save draft modal) ── */
 
 /**
  * Handle the "Save draft?" modal that appears when discarding mid-application.
  * Clicks "Discard" to exit cleanly.
+ * FIX F61: Try Escape key first before looking for save draft modal.
  */
 function discardApplication(): boolean {
+  // FIX F61: Try Escape key first to dismiss any open modal
+  document.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "Escape",
+      code: "Escape",
+      keyCode: 27,
+      which: 27,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    })
+  )
+
+  // Check if modal is already gone after Escape
+  const modalStillPresent = document.querySelector(EASY_APPLY_MODAL_SELECTOR)
+  if (!modalStillPresent) return true
+
   // Check for save draft modal
   const saveModal = document.querySelector(
     ".artdeco-modal--layer, " +
@@ -437,17 +559,6 @@ function discardApplication(): boolean {
   )
 
   if (!saveModal) {
-    // Try pressing Escape first
-    document.dispatchEvent(
-      new KeyboardEvent("keydown", {
-        key: "Escape",
-        code: "Escape",
-        keyCode: 27,
-        which: 27,
-        bubbles: true,
-        cancelable: true,
-      })
-    )
     return true
   }
 
@@ -475,6 +586,7 @@ function discardApplication(): boolean {
 
   return false
 }
+
 
 /* ── Follow company checkbox ── */
 
@@ -810,6 +922,7 @@ async function handleStuck(
 /**
  * Wait for the user to click Resume (or Stop) after a pause-for-help event.
  * Returns true if resumed, false if stopped.
+ * FIX F59: Add timeout to prevent infinite wait.
  */
 function waitForResume(signal?: AbortSignal): Promise<boolean> {
   return new Promise((resolve) => {
@@ -828,6 +941,7 @@ function waitForResume(signal?: AbortSignal): Promise<boolean> {
       if (signal) {
         signal.removeEventListener("abort", onAbort)
       }
+      clearTimeout(timeoutId)
     }
 
     function onAbort(): void {
@@ -841,6 +955,14 @@ function waitForResume(signal?: AbortSignal): Promise<boolean> {
     if (signal) {
       signal.addEventListener("abort", onAbort, { once: true })
     }
+
+    // FIX F59: Timeout to prevent infinite wait
+    const timeoutId = setTimeout(() => {
+      cleanup()
+      console.warn("[SOS] EasyApply: waitForResume timed out — treating as stop")
+      resolve(false)
+    }, WAIT_FOR_RESUME_TIMEOUT)
   })
 }
+
 

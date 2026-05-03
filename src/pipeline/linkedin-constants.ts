@@ -22,7 +22,10 @@ export const LINKEDIN_RESULTS_SELECTOR =
 export const CARD_SELECTOR =
   "a.job-card-list__title, " +
   "a.job-card-container__link, " +
-  "li.jobs-search-results__list-item a[href*='/jobs/view']"
+  "li.jobs-search-results__list-item a[href*='/jobs/view'], " +
+  "a[href*='/jobs/view'], " +
+  "div.job-card-container, " +
+  "li[data-occludable-job-id]"
 
 /** Selector for the job detail panel. */
 export const DETAIL_PANEL_SELECTOR =
@@ -112,4 +115,46 @@ export const SORT_MAP: Record<string, string> = {
 }
 
 /** Filter URL param keys cleaned before rebuilding. */
-export const FILTER_URL_PARAMS = ["f_SB2", "f_TPR", "f_E", "f_JT", "f_WT", "f_AL"]
+export const FILTER_URL_PARAMS = ["f_SB2", "f_TPR", "f_E", "f_JT", "f_WT", "f_AL", "f_CF"]
+
+/** Date posted param values for cycling. */
+export const DATE_POSTED_VALUES = ["r86400", "r604800", "r2592000"]
+
+/** Sort param values for alternating. */
+export const SORT_VALUES = ["1", "2"]
+
+/** Non-English "All filters" button selectors. */
+export const ALL_FILTERS_BUTTON_SELECTORS =
+  "button[aria-label*='All filters'], " +
+  "button.jobs-search-dropdown__trigger--all-filters, " +
+  "button[data-control-name*='filter'], " +
+  "button[data-control-name*='all_filters']"
+
+/** Non-English "Show results" button selectors. */
+export const SHOW_RESULTS_BUTTON_SELECTORS =
+  "button[aria-label*='Show results'], " +
+  "button.jobs-search-all-filters__apply-button, " +
+  "button[data-control-name*='apply_filters']"
+
+/** Description content selectors (wait for actual content, not skeleton). */
+export const DESCRIPTION_CONTENT_SELECTOR =
+  ".jobs-description__content, " +
+  ".jobs-box__html-content, " +
+  ".job-details-jobs-unified-top-card__description-container, " +
+  "article, " +
+  ".jobs-description"
+
+/** "Show more" button selectors. */
+export const SHOW_MORE_BUTTON_SELECTOR =
+  "button[aria-label*='Show more'], " +
+  "button[aria-label*='Read more'], " +
+  "button[aria-label*='View more'], " +
+  "button[aria-label*='Show full'], " +
+  "button.inline-show-more-text__button, " +
+  ".jobs-description__show-more button"
+
+/** Empty state indicator selectors. */
+export const EMPTY_STATE_SELECTOR =
+  ".jobs-search-no-results, " +
+  ".jobs-search-two-pane__no-results, " +
+  "div[data-test-no-results]"

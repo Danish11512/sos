@@ -109,11 +109,12 @@ async function createWidget(presetId: string): Promise<void> {
   })
 
   // Subscribe to daily-limit-reached from modal engine
+  // FIX F68: Don't abort signal on daily limit — let pipeline handle it gracefully
   const unsubDailyLimit = eventBus.on("daily-limit-reached", () => {
-    abortController?.abort()
     widget?.setProgress("Daily Easy Apply limit reached — try again tomorrow")
     widget?.setDone()
   })
+
 
   // Override destroy to clean up event subscriptions
   const origDestroy = widget.destroy.bind(widget)

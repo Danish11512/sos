@@ -200,6 +200,7 @@ export function matchQuestionToAnswer(
 /**
  * Find the best matching option from a list of <option> or label texts.
  * Uses fuzzy matching (case-insensitive substring).
+ * FIX F53: For Yes/No questions, use exact matching first before substring.
  */
 export function findBestOption(
   options: string[],
@@ -222,21 +223,33 @@ export function findBestOption(
   }
 
   // For yes/no questions, try common variants
+  // FIX F53: Use exact matching for Yes/No before substring to avoid false positives
   if (lowerAnswer === "yes" || lowerAnswer === "true" || lowerAnswer === "y") {
     for (const opt of options) {
+      const lo = opt.toLowerCase().trim()
+      if (lo === "yes" || lo === "true" || lo === "y") return opt
+    }
+    // Fallback to substring only if no exact match found
+    for (const opt of options) {
       const lo = opt.toLowerCase()
-      if (lo === "yes" || lo === "true" || lo === "y" || lo.includes("yes")) return opt
+      if (lo.includes("yes")) return opt
     }
   }
   if (lowerAnswer === "no" || lowerAnswer === "false" || lowerAnswer === "n") {
     for (const opt of options) {
+      const lo = opt.toLowerCase().trim()
+      if (lo === "no" || lo === "false" || lo === "n") return opt
+    }
+    // Fallback to substring only if no exact match found
+    for (const opt of options) {
       const lo = opt.toLowerCase()
-      if (lo === "no" || lo === "false" || lo === "n" || lo.includes("no")) return opt
+      if (lo.includes("no")) return opt
     }
   }
 
   return null
 }
+
 
 /**
  * Classify a form element's question type.
