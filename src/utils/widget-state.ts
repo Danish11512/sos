@@ -10,16 +10,16 @@ import type { SiteWidgetState } from "../types/ui"
 /* ── Transition table ── */
 
 export const ALLOWED_TRANSITIONS: Record<SiteWidgetState, SiteWidgetState[]> = {
-  idle:         ["nav", "ready", "needsInfo", "running", "starting", "paused"],
-  needsInfo:    ["ready", "idle", "nav"],
+  idle:         ["nav", "ready", "needsInfo"],
+  needsInfo:    ["ready", "idle"],
   nav:          ["idle", "ready"],
-  ready:        ["starting", "needsInfo", "idle", "nav"],
+  ready:        ["starting", "needsInfo", "idle"],
   starting:     ["running", "error", "stopped"],
   running:      ["paused", "done", "error", "stopped"],
   paused:       ["running", "stopped"],
-  stopped:      ["ready", "nav"],
-  done:         ["ready", "nav"],
-  error:        ["ready", "starting", "nav"],
+  stopped:      ["ready"],
+  done:         ["ready"],
+  error:        ["ready", "starting"],
 }
 
 /* ── Pure functions ── */

@@ -1,14 +1,12 @@
 /**
- * Pipeline orchestrator — dispatches to the correct site pipeline
- * and handles post-navigation filter application.
+ * Pipeline orchestrator — dispatches to the correct site pipeline.
  *
  * LinkedIn uses the new DOM-based pipeline (no page reloads).
- * Other sites (Indeed) use the legacy URL-based navigation pipeline.
+ * Indeed uses the legacy URL-based navigation pipeline.
  */
 
 import type { AppSettings } from "../settings/sections"
 import { loadSettings } from "../utils/storage"
-import { runLinkedInPipeline } from "./linkedin"
 import { runIndeedPipeline, applyIndeedExtraFilters } from "./indeed"
 import type { ApplyFiltersResult, ScrapeJobResult } from "./types"
 
@@ -21,19 +19,13 @@ async function getSiteSettings(siteId: string): Promise<AppSettings["perSite"][s
 
 /**
  * Run the full pipeline for a given site.
- * For LinkedIn: uses DOM-based navigation (no page reload).
- * For Indeed: uses legacy URL-based navigation.
+ * LinkedIn uses widget-based flow in content.ts — this only handles Indeed.
  */
 export async function runPipeline(siteId: string): Promise<ApplyFiltersResult> {
   const site = await getSiteSettings(siteId)
   if (!site) return { success: false, appliedCount: 0, errors: ["Site settings not found"] }
 
   switch (siteId) {
-    case "linkedin":
-      // Legacy runPipeline entry — LinkedIn now uses the widget-based flow in content.ts
-      console.warn("[SOS] runPipeline called for LinkedIn — use content.ts widget flow instead")
-      return { success: true, appliedCount: 0, errors: [] }
-
     case "indeed":
       return runIndeedPipeline(site)
     default:
@@ -49,8 +41,6 @@ export async function applyPostNavFilters(siteId: string): Promise<ApplyFiltersR
   if (!site) return { success: false, appliedCount: 0, errors: [] }
 
   switch (siteId) {
-    case "linkedin":
-      return { success: true, appliedCount: 0, errors: [] } // LinkedIn handles this internally
     case "indeed":
       return applyIndeedExtraFilters(site)
     default:

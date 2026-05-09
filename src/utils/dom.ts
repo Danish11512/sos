@@ -535,3 +535,134 @@ export function isLinkedInLoggedIn(): boolean {
   // Default: assume logged in (we're on LinkedIn, likely authenticated)
   return true
 }
+
+/**
+ * Check if the detail panel has an external apply link.
+ * Returns the URL if found, null otherwise.
+ */
+export function detectExternalApply(detailPanel: Element): string | null {
+  const externalLink = detailPanel.querySelector<HTMLAnchorElement>(
+    "a[href*='apply-url'], " +
+    "a.jobs-apply-button--external, " +
+    "a[data-tracking-control-name*='external_job'], " +
+    "a[href^='http']:not([href*='linkedin.com'])"
+  )
+  if (externalLink?.href) return externalLink.href
+  return null
+}
+
+/**
+ * Retry a function up to `maxRetries` times with exponential backoff.
+ * Uses waitForCondition (mutation-based) between retries instead of delay().
+ */
+export async function retryApply<T>(
+  fn: () => Promise<T>,
+  maxRetries = 3,
+  signal?: AbortSignal
+): Promise<T> {
+  let lastError: unknown
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    signal?.throwIfAborted()
+    try {
+      return await fn()
+    } catch (err) {
+      lastError = err
+      if (attempt < maxRetries) {
+        console.log(`[SOS] Retry attempt ${attempt}/${maxRetries} after error:`, err)
+        try {
+          await waitForCondition(
+            () => document.querySelectorAll("*").length > 0,
+            { timeoutMs: 2_000 * attempt, signal }
+          )
+        } catch {
+          // Timeout waiting — continue to retry anyway
+        }
+      }
+    }
+  }
+
+  throw lastError
+}
+
+/**
+ * Handle the "Save draft?" modal that appears when discarding mid-application.
+ * Clicks "Discard" to exit cleanly.
+ */
+export function discardApplication(): boolean {
+  // Try Escape key first to dismiss any open modal
+  document.dispatchEvent(
+    new KeyboardEvent("keydown", {
+      key: "Escape",
+      code: "Escape",
+      keyCode: 27,
+      which: 27,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    })
+  )
+  document.dispatchEvent(
+    new KeyboardEvent("keyup", {
+      key: "Escape",
+      code: "Escape",
+      keyCode: 27,
+      which: 27,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    })
+  )
+
+  // Check if modal is already gone after Escape
+  const modalStillPresent = document.querySelector(".jobs-easy-apply-modal")
+  if (!modalStillPresent) return true
+
+  // Look for save draft modal with specific selectors
+  const saveModal = document.querySelector(
+    "div[data-test-save-draft-modal], " +
+    ".artdeco-modal--layer:not(.jobs-easy-apply-modal) div[role='dialog'], " +
+    ".artdeco-modal-layer:not(.jobs-easy-apply-modal) div[role='dialog'], " +
+    "div[role='alertdialog']"
+  )
+
+  if (!saveModal) {
+    // Fallback — scan all visible dialogs for save/discard text
+    const allDialogs = document.querySelectorAll<HTMLElement>(
+      "div[role='dialog'], .artdeco-modal, .artdeco-modal--layer"
+    )
+    for (const dialog of allDialogs) {
+      if (dialog.matches(".jobs-easy-apply-modal")) continue
+      const text = dialog.textContent?.toLowerCase() || ""
+      if (text.includes("save") && (text.includes("draft") || text.includes("application"))) {
+        const discardBtn = findButtonByText(dialog, "discard", "delete", "don't save", "no")
+        if (discardBtn) {
+          scrollAndClick(discardBtn)
+          return true
+        }
+      }
+    }
+    return true
+  }
+
+  const text = saveModal.textContent?.toLowerCase() || ""
+  if (text.includes("save") && (text.includes("draft") || text.includes("application"))) {
+    const discardBtn = findButtonByText(saveModal, "discard", "delete", "don't save", "no")
+    if (discardBtn) {
+      scrollAndClick(discardBtn)
+      return true
+    }
+  }
+
+  const closeBtn = saveModal.querySelector<HTMLElement>(
+    "button[aria-label*='Dismiss'], " +
+    "button[aria-label*='Close'], " +
+    "button.artdeco-modal__dismiss"
+  )
+  if (closeBtn) {
+    scrollAndClick(closeBtn)
+    return true
+  }
+
+  return false
+}

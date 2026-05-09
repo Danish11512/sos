@@ -26,8 +26,7 @@
  */
 
 import type { SiteSettings, FilterSettings } from "../settings/sections"
-import type { ApplyFiltersResult, ApplyToJobResult, JobPreview } from "./types"
-import type { ModalResult } from "./modal-result"
+import type { ApplyFiltersResult, ApplyToJobResult, JobPreview, ModalResult } from "./types"
 import {
   checkCompanyList,
   extractSalary,
@@ -43,28 +42,21 @@ import {
   pushStateNavigate,
   setReactInputValue,
   dispatchEnterKey,
-  dispatchEscapeKey,
   waitForCondition,
   waitForNewElements,
   randomDelay,
   detectAntiBotInterstitial,
   isLinkedInLoggedIn,
+  detectExternalApply,
+  retryApply,
 } from "../utils/dom"
-
-import { eventBus } from "../utils/event-bus"
-import { browser } from "wxt/browser"
-
 
 import {
   SEARCH_INPUT_SELECTOR,
-  LINKEDIN_RESULTS_SELECTOR,
   CARD_SELECTOR,
   DETAIL_PANEL_SELECTOR,
   LIST_SCROLLER_SELECTOR,
-  EASY_APPLY_BUTTON_SELECTOR,
-  EXTERNAL_APPLY_SELECTOR,
   EASY_APPLY_MODAL_SELECTOR,
-  EASY_APPLY_CLOSE_SELECTOR,
   LINKEDIN_JOBS_SEARCH_URL,
   SEARCH_PAGE_PATH,
   DATE_POSTED_MAP,
@@ -82,19 +74,9 @@ import {
   EMPTY_STATE_SELECTOR,
 } from "./linkedin-constants"
 
-import { fillEasyApplyModal, detectExternalApply } from "./easy-apply-modal"
-
-/* ── Pipeline state persistence key ── */
-const PIPELINE_STATE_KEY = "sos_linkedin_pipeline_state"
-
-interface PipelinePersistedState {
-  termIndex: number
-  jobIndex: number
-  totalProcessed: number
-  sortToggle: boolean
-  dateCycleIndex: number
-  timestamp: number
-}
+import { fillEasyApplyModal, clickEasyApplyButton, closeEasyApplyModal } from "./easy-apply-modal"
+import { loadPipelineState, savePipelineState, clearPipelineState } from "../utils/storage"
+import type { PipelinePersistedState } from "../utils/storage"
 
 /* ── Condition helpers ── */
 
@@ -139,44 +121,6 @@ async function waitForDetailPanel(
     return document.querySelector(DETAIL_PANEL_SELECTOR)
   } catch {
     return null
-  }
-}
-
-/**
- * Wait for the Easy Apply modal to appear and be fully loaded (has form content).
- */
-async function waitForEasyApplyModal(timeoutMs = 8_000, signal?: AbortSignal): Promise<Element | null> {
-  const modal = await waitForElement(EASY_APPLY_MODAL_SELECTOR, timeoutMs, signal)
-  if (!modal) return null
-
-  // Wait for modal to have actual form content
-  try {
-    await waitForCondition(
-      () => {
-        const m = document.querySelector(EASY_APPLY_MODAL_SELECTOR)
-        return m?.querySelector("form, input, select, textarea") !== null
-      },
-      { timeoutMs: 3_000, signal }
-    )
-  } catch {
-    // Modal appeared but no form content — still return it
-  }
-
-  return modal
-}
-
-/**
- * Wait for the modal to close (disappear from DOM).
- */
-async function waitForModalClose(timeoutMs = 3_000, signal?: AbortSignal): Promise<boolean> {
-  try {
-    await waitForCondition(
-      () => !document.querySelector(EASY_APPLY_MODAL_SELECTOR),
-      { timeoutMs, signal }
-    )
-    return true
-  } catch {
-    return false
   }
 }
 
@@ -266,156 +210,6 @@ export function navigateToSearchPage(): void {
 
   // Fallback: full page redirect
   window.location.href = LINKEDIN_JOBS_SEARCH_URL
-}
-
-/* ── Easy Apply: Click button ── */
-
-/**
- * Click the Easy Apply button in the job detail panel and wait for the
- * apply modal to appear.
- *
- * Uses MutationObserver-based waiting instead of retry loops with delays.
- * The waitForElement call handles the "wait for button to appear" part.
- *
- * Returns the modal element if found, null otherwise.
- */
-export async function clickEasyApplyButton(
-  detailPanel: Element,
-  signal?: AbortSignal
-): Promise<Element | null> {
-  signal?.throwIfAborted()
-
-  // Check if the job has already been applied to
-  const allButtons = detailPanel.querySelectorAll("button")
-  for (const btn of allButtons) {
-    const text = btn.textContent?.trim().toLowerCase() || ""
-    if (text.includes("applied") || text.includes("submitted") || text.includes("withdrawn")) {
-      console.log(`[SOS] LinkedIn: Job already applied to — button text: "${text}"`)
-      return null
-    }
-  }
-
-  // Check for external apply link early and skip
-  const externalBtn = detailPanel.querySelector<HTMLAnchorElement>(EXTERNAL_APPLY_SELECTOR)
-  if (externalBtn) {
-    console.log("[SOS] LinkedIn: Found external apply link — skipping job (no new tab)")
-    return null
-  }
-
-  // Wait for the Easy Apply button to appear in the detail panel
-  const applyBtn = await waitForElement<HTMLElement>(EASY_APPLY_BUTTON_SELECTOR, 8_000, signal)
-  if (!applyBtn) {
-    // Fallback: scan all buttons in detail panel for text match
-    const fallbackBtn = (() => {
-      for (const btn of detailPanel.querySelectorAll("button")) {
-        const text = btn.textContent?.trim().toLowerCase() || ""
-        const negativeIndicators = ["applied", "submitted", "withdrawn"]
-        if (negativeIndicators.some((neg) => text.includes(neg))) continue
-        if (text.includes("easy apply") || text.includes("apply now") || text === "apply") {
-          return btn
-        }
-      }
-      return null
-    })()
-
-    if (!fallbackBtn) {
-      console.warn("[SOS] LinkedIn: Could not find Easy Apply button in detail panel")
-      return null
-    }
-
-    console.log("[SOS] LinkedIn: Clicking Easy Apply button (text-based fallback)")
-    scrollAndClick(fallbackBtn)
-  } else {
-    console.log("[SOS] LinkedIn: Clicking Easy Apply button")
-    scrollAndClick(applyBtn)
-  }
-
-  // Wait for modal to appear and be fully loaded
-  const modal = await waitForEasyApplyModal(8_000, signal)
-  if (modal) {
-    console.log("[SOS] LinkedIn: Easy Apply modal opened successfully")
-    return modal
-  }
-
-  console.warn("[SOS] LinkedIn: Easy Apply modal did not appear")
-  return null
-}
-
-/* ── Easy Apply: Close modal ── */
-
-/**
- * Close the Easy Apply modal by trying up to 3 strategies.
- * Uses waitForCondition to confirm the modal actually closed.
- */
-export async function closeEasyApplyModal(): Promise<boolean> {
-  const modal = document.querySelector(EASY_APPLY_MODAL_SELECTOR)
-  if (!modal) {
-    console.log("[SOS] LinkedIn: Modal already closed — skipping close")
-    return true
-  }
-
-  const originalBodyOverflow = document.body.style.overflow
-  const originalBodyPosition = document.body.style.position
-
-  // Strategy 1: Click the X / Dismiss button via CSS selector
-  const closeBtn = document.querySelector<HTMLElement>(
-    EASY_APPLY_CLOSE_SELECTOR + ", " +
-    "button[aria-label*='Dismiss'], " +
-    "button[aria-label*='Close'], " +
-    "button.artdeco-modal__dismiss, " +
-    "button.jobs-easy-apply-modal__close-btn, " +
-    ".artdeco-modal__dismiss, " +
-    "button[data-test-modal-close-btn]"
-  )
-  if (closeBtn) {
-    console.log("[SOS] LinkedIn: Clicking Easy Apply modal close button (strategy 1)")
-    scrollAndClick(closeBtn)
-    if (await waitForModalClose(2_000)) return true
-  }
-
-  // Strategy 2: Press Escape to dismiss
-  dispatchEscapeKey()
-  document.dispatchEvent(
-    new KeyboardEvent("keyup", {
-      key: "Escape",
-      code: "Escape",
-      keyCode: 27,
-      which: 27,
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-    })
-  )
-  console.log("[SOS] LinkedIn: Dispatched Escape key to dismiss modal (strategy 2)")
-  if (await waitForModalClose(2_000)) return true
-
-  // Strategy 3: DOM-level removal
-  console.log("[SOS] LinkedIn: Modal still present — removing from DOM (strategy 3)")
-  const easyApplyModal = document.querySelector(EASY_APPLY_MODAL_SELECTOR)
-  if (easyApplyModal) {
-    easyApplyModal.remove()
-    console.log("[SOS] LinkedIn: Removed Easy Apply modal element")
-  }
-
-  document.querySelectorAll(
-    ".artdeco-modal-overlay, " +
-    ".artdeco-modal-backdrop, " +
-    "div[data-test-modal-overlay]"
-  ).forEach((b) => b.remove())
-
-  if (document.body.style.overflow === "hidden" || document.body.style.position === "fixed") {
-    document.body.style.overflow = originalBodyOverflow
-    document.body.style.position = originalBodyPosition
-  }
-
-  const detailPanel = document.querySelector(DETAIL_PANEL_SELECTOR)
-  if (detailPanel) {
-    detailPanel.dispatchEvent(new MouseEvent("click", { bubbles: true }))
-  }
-
-  const gone = !document.querySelector(EASY_APPLY_MODAL_SELECTOR)
-  if (gone) console.log("[SOS] LinkedIn: Modal successfully removed from DOM")
-  return gone
 }
 
 /* ── Easy Apply: Validate + fill modal (combined) ── */
@@ -980,87 +774,6 @@ export async function readJobDescription(
   const text = getVisibleText(descriptionContent)
   console.log(`[SOS] LinkedIn: Read job description (${text.length} chars)`)
   return text
-}
-
-/* ── Pipeline state persistence ── */
-
-/**
- * Load persisted pipeline state from storage.
- */
-async function loadPipelineState(): Promise<PipelinePersistedState | null> {
-  try {
-    const result = await browser.storage.local.get(PIPELINE_STATE_KEY)
-    const state = result[PIPELINE_STATE_KEY] as PipelinePersistedState | undefined
-    return state ?? null
-  } catch {
-    return null
-  }
-}
-
-
-/**
- * Save pipeline state to storage for crash recovery.
- */
-async function savePipelineState(state: PipelinePersistedState): Promise<void> {
-  try {
-    await browser.storage.local.set({
-      [PIPELINE_STATE_KEY]: { ...state, timestamp: Date.now() },
-    })
-  } catch (e) {
-    console.warn("[SOS] LinkedIn: Failed to save pipeline state:", e)
-  }
-}
-
-/**
- * Clear persisted pipeline state.
- */
-async function clearPipelineState(): Promise<void> {
-  try {
-    await browser.storage.local.remove(PIPELINE_STATE_KEY)
-  } catch {
-    // Ignore
-  }
-}
-
-/* ── Retry wrapper ── */
-
-
-/**
- * Retry a function up to `maxRetries` times with exponential backoff.
- * Uses waitForCondition (mutation-based) between retries instead of delay().
- */
-async function retryApply<T>(
-  fn: () => Promise<T>,
-  maxRetries = 3,
-  signal?: AbortSignal
-): Promise<T> {
-  let lastError: unknown
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    signal?.throwIfAborted()
-    try {
-      return await fn()
-    } catch (err) {
-      lastError = err
-      if (attempt < maxRetries) {
-        console.log(`[SOS] LinkedIn: Retry attempt ${attempt}/${maxRetries} after error:`, err)
-        // Wait for DOM mutations instead of a fixed delay
-        try {
-          await waitForCondition(
-            () => {
-              // Wait for any DOM change (indicates page state has updated)
-              return document.querySelectorAll(CARD_SELECTOR).length > 0
-            },
-            { timeoutMs: 2_000 * attempt, signal }
-          )
-        } catch {
-          // Timeout waiting — continue to retry anyway
-        }
-      }
-    }
-  }
-
-  throw lastError
 }
 
 /* ── Pipeline orchestrator ── */

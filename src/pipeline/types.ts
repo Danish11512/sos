@@ -37,7 +37,6 @@ export interface ScrapeJobResult {
   errors: string[]
 }
 
-
 /**
  * Preview data extracted from a job card in the list view (no detail panel needed).
  * Use for batch pre-screening before drilling into individual jobs.
@@ -53,21 +52,24 @@ export interface JobPreview {
   jobId: string
 }
 
-/**
- * Progress message type for pipeline progress updates.
- * FIX F76: Use typed progress messages instead of raw strings.
- */
-export interface ProgressMessage {
-  /** Human-readable progress text */
-  text: string
-  /** Current phase of the pipeline */
-  phase: "navigation" | "filtering" | "reading" | "validating" | "applying" | "complete" | "error"
-  /** Optional percentage (0-100) */
-  percent?: number
-  /** Optional job title being processed */
-  jobTitle?: string
-  /** Optional company name */
-  company?: string
+/* ── Modal result types (merged from modal-result.ts) ── */
+
+/** Final outcome of filling an Easy Apply modal. */
+export type ModalResult =
+  | { status: "success"; reason: string }
+  | { status: "failed"; reason: string }
+  | { status: "skipped"; reason: string }
+  | { status: "dailyLimitReached"; reason: string }
+
+/** Result of answering a single question step. */
+export interface QuestionStepResult {
+  answered: number
+  errors: string[]
 }
 
-
+/** Result of a single navigation step (clicking Next / Review / Submit). */
+export interface NavigationStepResult {
+  action: "next" | "review" | "submit" | "stuck" | "done"
+  /** If stuck, the label of the question that caused the block. */
+  stuckOnLabel?: string
+}

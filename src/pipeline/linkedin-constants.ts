@@ -70,12 +70,12 @@ export const EASY_APPLY_CLOSE_SELECTOR =
   "button.jobs-easy-apply-modal__close-btn, " +
   ".artdeco-modal__dismiss"
 
-/** LinkedIn jobs search page URL. */
-
-export const LINKEDIN_JOBS_SEARCH_URL = "https://www.linkedin.com/jobs/search/"
+/** LinkedIn jobs search page URL. Uses /search-results/ path with random currentJobId to avoid wrong page. */
+const RANDOM_JOB_ID = Math.floor(Math.random() * 900000000) + 100000000
+export const LINKEDIN_JOBS_SEARCH_URL = `https://www.linkedin.com/jobs/search-results/?currentJobId=${RANDOM_JOB_ID}&keywords=software%20engineer&origin=SEMANTIC_SEARCH_HISTORY&geoId=90000070&distance=25`
 
 /** URL path fragment that identifies a search results page. */
-export const SEARCH_PAGE_PATH = "/jobs/search/"
+export const SEARCH_PAGE_PATH = "/jobs/search-results/"
 
 /* ── URL param maps ── */
 

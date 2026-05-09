@@ -26,9 +26,6 @@ export type SiteWidgetState =
   | "error"
 
 
-/** Legacy alias for backwards compat. Maps: idle→idle, ready→ready, running→running, done→done */
-export type WidgetState = SiteWidgetState
-
 /**
  * Persisted per-site pipeline state.
  * Stored under key `sos_state_<siteId>` in browser.storage.local.

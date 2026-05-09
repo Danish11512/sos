@@ -14,7 +14,7 @@
  */
 
 import type { SiteSettings } from "../settings/sections"
-import type { ModalResult, NavigationStepResult } from "./modal-result"
+import type { ModalResult, NavigationStepResult } from "./types"
 import { eventBus } from "../utils/event-bus"
 import { settingsManager } from "../settings/manager"
 import {
@@ -23,6 +23,8 @@ import {
   findButtonByText,
   setReactInputValue,
   waitForElement,
+  waitForCondition,
+  dispatchEscapeKey,
 } from "../utils/dom"
 import {
   matchQuestionToAnswer,
@@ -34,6 +36,9 @@ import type { AnswerContext } from "./question-matcher"
 import {
   EASY_APPLY_MODAL_SELECTOR,
   EASY_APPLY_CLOSE_SELECTOR,
+  EASY_APPLY_BUTTON_SELECTOR,
+  EXTERNAL_APPLY_SELECTOR,
+  DETAIL_PANEL_SELECTOR,
 } from "./linkedin-constants"
 
 /* ── Constants ── */
@@ -81,23 +86,6 @@ export function checkDailyLimit(modal: Element): boolean {
   return limitPhrases.some((phrase) => text.includes(phrase))
 }
 
-
-/* ── External apply detection ── */
-
-/**
- * Check if the detail panel has an external apply link.
- * Returns the URL if found, null otherwise.
- */
-export function detectExternalApply(detailPanel: Element): string | null {
-  const externalLink = detailPanel.querySelector<HTMLAnchorElement>(
-    "a[href*='apply-url'], " +
-    "a.jobs-apply-button--external, " +
-    "a[data-tracking-control-name*='external_job'], " +
-    "a[href^='http']:not([href*='linkedin.com'])"
-  )
-  if (externalLink?.href) return externalLink.href
-  return null
-}
 
 /* ── Form element discovery ── */
 
@@ -526,102 +514,6 @@ async function clickSubmitApplication(
 }
 
 
-/* ── Discard application (save draft modal) ── */
-
-/**
- * Handle the "Save draft?" modal that appears when discarding mid-application.
- * Clicks "Discard" to exit cleanly.
- * FIX F61: Try Escape key first before looking for save draft modal.
- * FIX F83: Fix save draft modal detection — use more specific selectors
- *          and handle the case where the discard button is in a nested modal layer.
- */
-export function discardApplication(): boolean {
-  // FIX F61: Try Escape key first to dismiss any open modal
-  document.dispatchEvent(
-    new KeyboardEvent("keydown", {
-      key: "Escape",
-      code: "Escape",
-      keyCode: 27,
-      which: 27,
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-    })
-  )
-  document.dispatchEvent(
-    new KeyboardEvent("keyup", {
-      key: "Escape",
-      code: "Escape",
-      keyCode: 27,
-      which: 27,
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-    })
-  )
-
-  // Check if modal is already gone after Escape
-  const modalStillPresent = document.querySelector(EASY_APPLY_MODAL_SELECTOR)
-  if (!modalStillPresent) return true
-
-  // FIX F83: Look for save draft modal with more specific selectors
-  // The save draft modal is typically a separate dialog layered on top
-  const saveModal = document.querySelector(
-    // FIX F83: Use more specific selectors — avoid matching the main modal itself
-    "div[data-test-save-draft-modal], " +
-    ".artdeco-modal--layer:not(.jobs-easy-apply-modal) div[role='dialog'], " +
-    ".artdeco-modal-layer:not(.jobs-easy-apply-modal) div[role='dialog'], " +
-    "div[role='alertdialog']"
-  )
-
-  if (!saveModal) {
-    // FIX F83: Fallback — scan all visible dialogs for save/discard text
-    const allDialogs = document.querySelectorAll<HTMLElement>(
-      "div[role='dialog'], .artdeco-modal, .artdeco-modal--layer"
-    )
-    for (const dialog of allDialogs) {
-      // Skip the main easy apply modal itself
-      if (dialog.matches(EASY_APPLY_MODAL_SELECTOR)) continue
-      const text = dialog.textContent?.toLowerCase() || ""
-      if (text.includes("save") && (text.includes("draft") || text.includes("application"))) {
-        const discardBtn = findButtonByText(dialog, "discard", "delete", "don't save", "no")
-        if (discardBtn) {
-          scrollAndClick(discardBtn)
-          return true
-        }
-      }
-    }
-    // No save draft modal found — modal is likely already dismissed
-    return true
-  }
-
-  const text = saveModal.textContent?.toLowerCase() || ""
-
-  // Check if this is a save draft modal
-  if (text.includes("save") && (text.includes("draft") || text.includes("application"))) {
-    const discardBtn = findButtonByText(saveModal, "discard", "delete", "don't save", "no")
-    if (discardBtn) {
-      scrollAndClick(discardBtn)
-      return true
-    }
-  }
-
-  // If not a save draft modal, try the close button
-  const closeBtn = saveModal.querySelector<HTMLElement>(
-    "button[aria-label*='Dismiss'], " +
-    "button[aria-label*='Close'], " +
-    "button.artdeco-modal__dismiss"
-  )
-  if (closeBtn) {
-    scrollAndClick(closeBtn)
-    return true
-  }
-
-  return false
-}
-
-
-
 /* ── Follow company checkbox ── */
 
 /**
@@ -997,6 +889,196 @@ function waitForResume(signal?: AbortSignal): Promise<boolean> {
       resolve(false)
     }, WAIT_FOR_RESUME_TIMEOUT)
   })
+}
+
+/* ── Modal wait helpers (moved from linkedin.ts) ── */
+
+/**
+ * Wait for the Easy Apply modal to appear and be fully loaded (has form content).
+ */
+async function waitForEasyApplyModal(timeoutMs = 8_000, signal?: AbortSignal): Promise<Element | null> {
+  const modal = await waitForElement(EASY_APPLY_MODAL_SELECTOR, timeoutMs, signal)
+  if (!modal) return null
+
+  // Wait for modal to have actual form content
+  try {
+    await waitForCondition(
+      () => {
+        const m = document.querySelector(EASY_APPLY_MODAL_SELECTOR)
+        return m?.querySelector("form, input, select, textarea") !== null
+      },
+      { timeoutMs: 3_000, signal }
+    )
+  } catch {
+    // Modal appeared but no form content — still return it
+  }
+
+  return modal
+}
+
+/**
+ * Wait for the modal to close (disappear from DOM).
+ */
+async function waitForModalClose(timeoutMs = 3_000, signal?: AbortSignal): Promise<boolean> {
+  try {
+    await waitForCondition(
+      () => !document.querySelector(EASY_APPLY_MODAL_SELECTOR),
+      { timeoutMs, signal }
+    )
+    return true
+  } catch {
+    return false
+  }
+}
+
+/* ── Easy Apply: Click button (moved from linkedin.ts) ── */
+
+/**
+ * Click the Easy Apply button in the job detail panel and wait for the
+ * apply modal to appear.
+ *
+ * Uses MutationObserver-based waiting instead of retry loops with delays.
+ * The waitForElement call handles the "wait for button to appear" part.
+ *
+ * Returns the modal element if found, null otherwise.
+ */
+export async function clickEasyApplyButton(
+  detailPanel: Element,
+  signal?: AbortSignal
+): Promise<Element | null> {
+  signal?.throwIfAborted()
+
+  // Check if the job has already been applied to
+  const allButtons = detailPanel.querySelectorAll("button")
+  for (const btn of allButtons) {
+    const text = btn.textContent?.trim().toLowerCase() || ""
+    if (text.includes("applied") || text.includes("submitted") || text.includes("withdrawn")) {
+      console.log(`[SOS] LinkedIn: Job already applied to — button text: "${text}"`)
+      return null
+    }
+  }
+
+  // Check for external apply link early and skip
+  const externalBtn = detailPanel.querySelector<HTMLAnchorElement>(EXTERNAL_APPLY_SELECTOR)
+  if (externalBtn) {
+    console.log("[SOS] LinkedIn: Found external apply link — skipping job (no new tab)")
+    return null
+  }
+
+  // Wait for the Easy Apply button to appear in the detail panel
+  const applyBtn = await waitForElement<HTMLElement>(EASY_APPLY_BUTTON_SELECTOR, 8_000, signal)
+  if (!applyBtn) {
+    // Fallback: scan all buttons in detail panel for text match
+    const fallbackBtn = (() => {
+      for (const btn of detailPanel.querySelectorAll("button")) {
+        const text = btn.textContent?.trim().toLowerCase() || ""
+        const negativeIndicators = ["applied", "submitted", "withdrawn"]
+        if (negativeIndicators.some((neg) => text.includes(neg))) continue
+        if (text.includes("easy apply") || text.includes("apply now") || text === "apply") {
+          return btn
+        }
+      }
+      return null
+    })()
+
+    if (!fallbackBtn) {
+      console.warn("[SOS] LinkedIn: Could not find Easy Apply button in detail panel")
+      return null
+    }
+
+    console.log("[SOS] LinkedIn: Clicking Easy Apply button (text-based fallback)")
+    scrollAndClick(fallbackBtn)
+  } else {
+    console.log("[SOS] LinkedIn: Clicking Easy Apply button")
+    scrollAndClick(applyBtn)
+  }
+
+  // Wait for modal to appear and be fully loaded
+  const modal = await waitForEasyApplyModal(8_000, signal)
+  if (modal) {
+    console.log("[SOS] LinkedIn: Easy Apply modal opened successfully")
+    return modal
+  }
+
+  console.warn("[SOS] LinkedIn: Easy Apply modal did not appear")
+  return null
+}
+
+/* ── Easy Apply: Close modal (moved from linkedin.ts) ── */
+
+/**
+ * Close the Easy Apply modal by trying up to 3 strategies.
+ * Uses waitForCondition to confirm the modal actually closed.
+ */
+export async function closeEasyApplyModal(): Promise<boolean> {
+  const modal = document.querySelector(EASY_APPLY_MODAL_SELECTOR)
+  if (!modal) {
+    console.log("[SOS] LinkedIn: Modal already closed — skipping close")
+    return true
+  }
+
+  const originalBodyOverflow = document.body.style.overflow
+  const originalBodyPosition = document.body.style.position
+
+  // Strategy 1: Click the X / Dismiss button via CSS selector
+  const closeBtn = document.querySelector<HTMLElement>(
+    EASY_APPLY_CLOSE_SELECTOR + ", " +
+    "button[aria-label*='Dismiss'], " +
+    "button[aria-label*='Close'], " +
+    "button.artdeco-modal__dismiss, " +
+    "button.jobs-easy-apply-modal__close-btn, " +
+    ".artdeco-modal__dismiss, " +
+    "button[data-test-modal-close-btn]"
+  )
+  if (closeBtn) {
+    console.log("[SOS] LinkedIn: Clicking Easy Apply modal close button (strategy 1)")
+    scrollAndClick(closeBtn)
+    if (await waitForModalClose(2_000)) return true
+  }
+
+  // Strategy 2: Press Escape to dismiss
+  dispatchEscapeKey()
+  document.dispatchEvent(
+    new KeyboardEvent("keyup", {
+      key: "Escape",
+      code: "Escape",
+      keyCode: 27,
+      which: 27,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+    })
+  )
+  console.log("[SOS] LinkedIn: Dispatched Escape key to dismiss modal (strategy 2)")
+  if (await waitForModalClose(2_000)) return true
+
+  // Strategy 3: DOM-level removal
+  console.log("[SOS] LinkedIn: Modal still present — removing from DOM (strategy 3)")
+  const easyApplyModal = document.querySelector(EASY_APPLY_MODAL_SELECTOR)
+  if (easyApplyModal) {
+    easyApplyModal.remove()
+    console.log("[SOS] LinkedIn: Removed Easy Apply modal element")
+  }
+
+  document.querySelectorAll(
+    ".artdeco-modal-overlay, " +
+    ".artdeco-modal-backdrop, " +
+    "div[data-test-modal-overlay]"
+  ).forEach((b) => b.remove())
+
+  if (document.body.style.overflow === "hidden" || document.body.style.position === "fixed") {
+    document.body.style.overflow = originalBodyOverflow
+    document.body.style.position = originalBodyPosition
+  }
+
+  const detailPanel = document.querySelector(DETAIL_PANEL_SELECTOR)
+  if (detailPanel) {
+    detailPanel.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+  }
+
+  const gone = !document.querySelector(EASY_APPLY_MODAL_SELECTOR)
+  if (gone) console.log("[SOS] LinkedIn: Modal successfully removed from DOM")
+  return gone
 }
 
 

@@ -46,7 +46,8 @@ export class FloatingWidget {
 
   private form = new SettingsForm()
   private curState: SiteWidgetState = "idle"
-  private active = false
+  // NOTE: `active` flag removed — state machine drives behavior
+  // private active = false
   private options: FloatingWidgetOptions
   private settings!: AppSettings
   private siteId: string
@@ -88,7 +89,6 @@ export class FloatingWidget {
 
   setStopped(): void {
     if (this.curState === "stopped" || this.curState === "ready" || this.curState === "done") return
-    this.active = false
     this.setState("stopped")
     this.clearProgress()
     this.clearError()
@@ -100,7 +100,6 @@ export class FloatingWidget {
 
   setDone(): void {
     if (this.curState === "done" || this.curState === "stopped" || this.curState === "ready") return
-    this.active = false
     this.setState("done")
     this.clearProgress()
     this.clearError()
@@ -128,7 +127,6 @@ export class FloatingWidget {
 
   setError(msg: string): void {
     this.errMsg = msg
-    this.active = false
     this.setState("error")
     this.clearProgress()
     this.form.showErrorBanner(msg)
@@ -260,7 +258,6 @@ export class FloatingWidget {
   /* ── Pause stop ── */
 
   private handleFromPauseStop(): void {
-    this.active = false
     this.clearProgress()
     this.clearError()
     this.clearPauseControls()

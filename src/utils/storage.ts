@@ -94,3 +94,53 @@ export function onSettingsChanged(
   browser.storage.local.onChanged.addListener(handler)
   return () => browser.storage.local.onChanged.removeListener(handler)
 }
+
+/* ── Pipeline state persistence ── */
+
+const PIPELINE_STATE_KEY = "sos_linkedin_pipeline_state"
+
+export interface PipelinePersistedState {
+  termIndex: number
+  jobIndex: number
+  totalProcessed: number
+  sortToggle: boolean
+  dateCycleIndex: number
+  timestamp: number
+}
+
+/**
+ * Load persisted pipeline state from storage.
+ */
+export async function loadPipelineState(): Promise<PipelinePersistedState | null> {
+  try {
+    const result = await browser.storage.local.get(PIPELINE_STATE_KEY)
+    const state = result[PIPELINE_STATE_KEY] as PipelinePersistedState | undefined
+    return state ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Save pipeline state to storage for crash recovery.
+ */
+export async function savePipelineState(state: PipelinePersistedState): Promise<void> {
+  try {
+    await browser.storage.local.set({
+      [PIPELINE_STATE_KEY]: { ...state, timestamp: Date.now() },
+    })
+  } catch (e) {
+    console.warn("[SOS] Failed to save pipeline state:", e)
+  }
+}
+
+/**
+ * Clear persisted pipeline state.
+ */
+export async function clearPipelineState(): Promise<void> {
+  try {
+    await browser.storage.local.remove(PIPELINE_STATE_KEY)
+  } catch {
+    // Ignore
+  }
+}

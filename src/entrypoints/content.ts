@@ -17,7 +17,7 @@ import { loadSettings } from "../utils/storage"
 import { isOnSearchResultsPage, applyPostNavFilters, captureJobs } from "../pipeline/index"
 import { runLinkedInPipeline, navigateToSearchPage } from "../pipeline/linkedin"
 
-import { discardApplication } from "../pipeline/easy-apply-modal"
+import { discardApplication } from "../utils/dom"
 
 
 let widget: FloatingWidget | null = null
