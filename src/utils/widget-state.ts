@@ -10,9 +10,8 @@ import type { SiteWidgetState } from "../types/ui"
 /* ── Transition table ── */
 
 export const ALLOWED_TRANSITIONS: Record<SiteWidgetState, SiteWidgetState[]> = {
-  idle:         ["nav", "ready", "needsInfo"],
+  idle:         ["ready", "needsInfo"],
   needsInfo:    ["ready", "idle"],
-  nav:          ["idle", "ready"],
   ready:        ["starting", "needsInfo", "idle"],
   starting:     ["running", "error", "stopped"],
   running:      ["paused", "done", "error", "stopped"],
@@ -21,6 +20,7 @@ export const ALLOWED_TRANSITIONS: Record<SiteWidgetState, SiteWidgetState[]> = {
   done:         ["ready"],
   error:        ["ready", "starting"],
 }
+
 
 /* ── Pure functions ── */
 
@@ -41,8 +41,9 @@ export function isTerminal(state: SiteWidgetState): boolean {
 
 /** Check if a state allows user interaction with the form. */
 export function allowsFormEdit(state: SiteWidgetState): boolean {
-  return state === "idle" || state === "needsInfo" || state === "ready" || isTerminal(state) || state === "nav"
+  return state === "idle" || state === "needsInfo" || state === "ready" || isTerminal(state)
 }
+
 
 /** Check if a state represents an active pipeline. */
 export function isActive(state: SiteWidgetState): boolean {

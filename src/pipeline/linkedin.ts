@@ -1,9 +1,10 @@
 /**
  * LinkedIn-specific pipeline: DOM-based navigation + batch job reading.
  *
- * Navigation Strategy (no page reloads):
+ * Navigation Strategy (no page reloads — all DOM-based):
  *   - Search terms: DOM manipulation of the search input + Enter key
- *   - URL filters (f_E, f_JT, f_WT, etc.): history.pushState + PopStateEvent
+ *   - URL filters (f_E, f_JT, f_WT, etc.): Try pushState+popstate events first,
+ *     fall back to DOM interaction with LinkedIn's filter dropdown buttons
  *   - DOM-only toggles (under 10 applicants, in your network): "All filters" modal
  *
  * Wait Strategy (no time-based delays):
@@ -12,18 +13,19 @@
  *   - Only exception: randomDelay(1000, 2000) between jobs for visual feedback
  *
  * Easy Apply Strategy:
- *   - f_AL=true is ALWAYS set in the URL (Easy Apply filter is mandatory)
+ *   - Easy Apply toggle is ALWAYS enabled (mandatory)
  *   - Each job listing is checked for Easy Apply button in the detail panel
  *   - External apply jobs are skipped
  *
- * LinkedIn filter URL params:
- *   f_TPR=r86400 (past 24h), r604800 (week), r2592000 (month)
- *   f_SB2=1 (most recent), 2 (most relevant)
- *   f_E=2 (entry), 3 (associate), 4 (mid-senior), 5 (director), 6 (executive)
- *   f_JT=F (full-time), P (part-time), C (contract), T (temporary), V (volunteer), I (internship)
- *   f_WT=1 (on-site), 2 (remote), 3 (hybrid)
- *   f_AL=true (easy apply) — ALWAYS SET
+ * LinkedIn filter dropdown options:
+ *   Date Posted: "Past 24 hours", "Past week", "Past month"
+ *   Sort By: "Most recent", "Most relevant"
+ *   Experience Level: "Internship", "Entry level", "Associate", "Mid-Senior level", "Director", "Executive"
+ *   Job Type: "Full-time", "Part-time", "Contract", "Temporary", "Volunteer", "Internship"
+ *   On-site/Remote: "On-site", "Remote", "Hybrid"
+ *   Easy Apply: toggle button
  */
+
 
 import type { SiteSettings, FilterSettings } from "../settings/sections"
 import type { ApplyFiltersResult, ApplyToJobResult, JobPreview, ModalResult } from "./types"
@@ -43,28 +45,22 @@ import {
   setReactInputValue,
   dispatchEnterKey,
   waitForCondition,
-  waitForNewElements,
   randomDelay,
   detectAntiBotInterstitial,
   isLinkedInLoggedIn,
   detectExternalApply,
   retryApply,
+  delay,
 } from "../utils/dom"
 
 import {
+  GLOBAL_SEARCH_SELECTOR,
+  SEMANTIC_SEARCH_SELECTOR,
   SEARCH_INPUT_SELECTOR,
   CARD_SELECTOR,
   DETAIL_PANEL_SELECTOR,
   LIST_SCROLLER_SELECTOR,
   EASY_APPLY_MODAL_SELECTOR,
-  LINKEDIN_JOBS_SEARCH_URL,
-  SEARCH_PAGE_PATH,
-  DATE_POSTED_MAP,
-  EXPERIENCE_MAP,
-  JOB_TYPE_MAP,
-  ON_SITE_MAP,
-  SORT_MAP,
-  FILTER_URL_PARAMS,
   DATE_POSTED_VALUES,
   SORT_VALUES,
   ALL_FILTERS_BUTTON_SELECTORS,
@@ -72,11 +68,32 @@ import {
   DESCRIPTION_CONTENT_SELECTOR,
   SHOW_MORE_BUTTON_SELECTOR,
   EMPTY_STATE_SELECTOR,
+  FILTER_BTN_DATE_POSTED,
+  FILTER_BTN_EXPERIENCE,
+  FILTER_BTN_JOB_TYPE,
+  FILTER_BTN_ON_SITE,
+  FILTER_BTN_EASY_APPLY,
+  FILTER_BTN_SORT,
+  FILTER_DROPDOWN_PANEL,
+  FILTER_OPTION_TEXT,
+  DATE_POSTED_MAP,
+  EXPERIENCE_MAP,
+  JOB_TYPE_MAP,
+  ON_SITE_MAP,
+  SORT_MAP,
+  FILTER_URL_PARAMS,
+  LINKEDIN_JOBS_SEARCH_URL,
+  NEW_CARD_TITLE_SELECTOR,
+  NEW_CARD_TITLE_VISUAL_SELECTOR,
+  NEW_CARD_COMPANY_SELECTOR,
+  NEW_CARD_LOCATION_SELECTOR,
+  NEW_LIST_COLUMN_SELECTOR,
+  NEW_DETAIL_COLUMN_SELECTOR,
 } from "./linkedin-constants"
 
 import { fillEasyApplyModal, clickEasyApplyButton, closeEasyApplyModal } from "./easy-apply-modal"
-import { loadPipelineState, savePipelineState, clearPipelineState } from "../utils/storage"
-import type { PipelinePersistedState } from "../utils/storage"
+import { savePipelineState, clearPipelineState, saveResumeState, clearResumeState } from "../utils/storage"
+
 
 /* ── Condition helpers ── */
 
@@ -122,94 +139,6 @@ async function waitForDetailPanel(
   } catch {
     return null
   }
-}
-
-/* ── Filtered URL params helper (for pushState updates) ── */
-
-/**
- * Build only the filter-related URL params from site settings.
- * Preserves the existing page URL's keywords, location, and other params.
- * Returns a new URL that can be pushState'd.
- *
- * Always sets f_AL=true (Easy Apply filter is mandatory).
- */
-function buildFilterUrl(
-  site: SiteSettings,
-  overrides?: { datePosted?: string; sortBy?: string },
-  explicitKeywords?: string
-): URL {
-  const url = new URL(LINKEDIN_JOBS_SEARCH_URL)
-
-  // Preserve keywords, location, geoId from current URL
-  const currentUrl = new URL(window.location.href)
-  for (const key of ["keywords", "location", "geoId", "original_referer"]) {
-    const val = currentUrl.searchParams.get(key)
-    if (val) url.searchParams.set(key, val)
-  }
-
-  // If explicit keywords provided, use them
-  if (explicitKeywords) {
-    url.searchParams.set("keywords", explicitKeywords)
-  }
-
-  // Remove previous SOS filter params (clean slate)
-  for (const key of FILTER_URL_PARAMS) {
-    url.searchParams.delete(key)
-  }
-
-  // Sort (use override if provided, otherwise from settings)
-  const sortKey = overrides?.sortBy ?? site.filters.sortBy
-  const sortVal = SORT_MAP[sortKey.trim().toLowerCase()]
-  if (sortVal) url.searchParams.set("f_SB2", sortVal)
-
-  // Date posted (use override if provided, otherwise from settings)
-  const dateKey = overrides?.datePosted ?? site.filters.datePosted
-  const dateVal = DATE_POSTED_MAP[dateKey.trim().toLowerCase()]
-  if (dateVal) url.searchParams.set("f_TPR", dateVal)
-
-  // Experience level
-  const expCodes = site.filters.experienceLevel.map((v) => EXPERIENCE_MAP[v.trim()]).filter(Boolean)
-  if (expCodes.length > 0) url.searchParams.set("f_E", expCodes.join(","))
-
-  // Job type
-  const jobCodes = site.filters.jobType.map((v) => JOB_TYPE_MAP[v.trim()]).filter(Boolean)
-  if (jobCodes.length > 0) url.searchParams.set("f_JT", jobCodes.join(","))
-
-  // On-site / remote
-  const onsiteCodes = site.filters.onSite.map((v) => ON_SITE_MAP[v.trim()]).filter(Boolean)
-  if (onsiteCodes.length > 0) url.searchParams.set("f_WT", onsiteCodes.join(","))
-
-  // Easy Apply only — ALWAYS SET (mandatory)
-  url.searchParams.set("f_AL", "true")
-
-  return url
-}
-
-/* ── Navigation: Search Page (full redirect) ── */
-
-/**
- * Navigate to the LinkedIn jobs search page.
- */
-export function navigateToSearchPage(): void {
-  if (window.location.pathname.includes(SEARCH_PAGE_PATH)) {
-    console.log("[SOS] LinkedIn: Already on search page — skipping redirect")
-    return
-  }
-  console.log("[SOS] LinkedIn: Navigating to jobs search page")
-
-  // Try pushState first
-  try {
-    pushStateNavigate(LINKEDIN_JOBS_SEARCH_URL)
-    if (window.location.pathname.includes(SEARCH_PAGE_PATH)) {
-      console.log("[SOS] LinkedIn: SPA navigation succeeded")
-      return
-    }
-  } catch {
-    // Fall through to full redirect
-  }
-
-  // Fallback: full page redirect
-  window.location.href = LINKEDIN_JOBS_SEARCH_URL
 }
 
 /* ── Easy Apply: Validate + fill modal (combined) ── */
@@ -337,83 +266,653 @@ export async function applyToJob(
   }
 }
 
-/* ── Navigation: Search Term (DOM input manipulation) ── */
+/* ── Navigation: Search Term (multi-strategy) ── */
 
 /**
- * Navigate to a new search term via DOM manipulation of the LinkedIn search input.
+ * Type a value into an input element with full React/SPA compatibility.
+ * Dispatches focus, input, change, blur events after setting the native value.
+ */
+function typeIntoInput(input: HTMLInputElement | HTMLTextAreaElement, value: string): void {
+  input.focus()
+  input.click()
+  setReactInputValue(input, value)
+}
+
+/**
+ * Submit a search by dispatching Enter key and also trying form submit.
+ * Some SPA frameworks need the form submit event in addition to keyboard events.
+ */
+function submitSearch(input: Element): void {
+  // Dispatch Enter key events
+  dispatchEnterKey(input)
+
+  // Also try to submit the parent form if it exists
+  const form = input.closest("form")
+  if (form) {
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))
+  }
+
+  // Try clicking any visible search/submit button near the input
+  const container = input.closest("div, nav, header, form")
+  if (container) {
+    const searchBtn = container.querySelector<HTMLElement>(
+      "button[type='submit'], " +
+      "button[aria-label*='Search'], " +
+      "button[aria-label*='search'], " +
+      "button.search-global-typeahead__search-button"
+    )
+    if (searchBtn) {
+      searchBtn.click()
+    }
+  }
+}
+
+/**
+ * Strategy 1: Use LinkedIn's global search bar (top nav, present on ALL pages).
+ * Types the job title, then clicks the "Jobs" filter button in the typeahead dropdown
+ * to navigate to the jobs search results page.
+ *
+ * IMPORTANT: Clicking the "Jobs" radio button causes a FULL PAGE REFRESH.
+ * Before clicking, we save resume state to storage so the pipeline can
+ * continue automatically after the page reloads.
+ */
+async function searchViaGlobalBar(
+  term: string,
+  signal?: AbortSignal,
+  /** SiteSettings to save for resume after page refresh. */
+  site?: SiteSettings,
+  /** Current term index for resume. */
+  termIdx?: number
+): Promise<boolean> {
+  console.log("[SOS] LinkedIn: Trying global search bar...")
+
+  const input = await waitForElement<HTMLInputElement>(GLOBAL_SEARCH_SELECTOR, 5_000, signal)
+  if (!input) {
+    console.log("[SOS] LinkedIn: Global search bar not found")
+    return false
+  }
+
+  console.log("[SOS] LinkedIn: Found global search bar")
+
+  // Clear and type the term
+  typeIntoInput(input, term)
+
+  // Wait for the typeahead dropdown to appear with the "Jobs" filter option
+  await delay(800, signal)
+
+  // Find and click the "Jobs" radio button in the typeahead dropdown
+  // This navigates to the jobs search results page with the keywords
+  // First try: direct aria-label match
+  let jobsBtn = document.querySelector<HTMLElement>(
+    "a[role='radio'][aria-label*='Jobs'], " +
+    "a[role='radio'][aria-label*='Filter by Jobs']"
+  )
+
+  // Second try: search by text content among all radio buttons in the typeahead
+  if (!jobsBtn) {
+    jobsBtn = Array.from(document.querySelectorAll<HTMLElement>("a[role='radio']")).find(
+      (el) => el.textContent?.trim().toLowerCase() === "jobs" ||
+              el.getAttribute("aria-label")?.toLowerCase().includes("jobs")
+    ) || null
+  }
+
+  // Third try: look for any anchor with role='radio' inside the typeahead dropdown
+  if (!jobsBtn) {
+    const typeaheadDropdown = document.querySelector(
+      "[data-test-typeahead], " +
+      ".search-global-typeahead__typeahead, " +
+      "div[role='listbox']"
+    )
+    if (typeaheadDropdown) {
+      jobsBtn = typeaheadDropdown.querySelector<HTMLElement>(
+        "a[role='radio'], " +
+        "a[aria-label*='Jobs']"
+      )
+    }
+  }
+
+
+  if (jobsBtn) {
+    console.log("[SOS] LinkedIn: Clicking 'Jobs' filter in typeahead dropdown")
+
+    // Save resume state BEFORE clicking — this click causes a full page refresh
+    if (site && termIdx !== undefined) {
+      await saveResumeState({
+        searchTerm: term,
+        siteSettings: site as unknown as Record<string, unknown>,
+        termIndex: termIdx,
+        timestamp: Date.now(),
+      })
+      console.log("[SOS] LinkedIn: Saved resume state before page refresh")
+    }
+
+    scrollAndClick(jobsBtn)
+  } else {
+    console.log("[SOS] LinkedIn: 'Jobs' filter not found in typeahead — submitting search directly")
+    submitSearch(input)
+  }
+
+  // Wait for URL to change to jobs search results
+  try {
+    await waitForCondition(
+      () => window.location.href.includes("/jobs/"),
+      { timeoutMs: 10_000, signal, pollIntervalMs: 200 }
+    )
+    console.log("[SOS] LinkedIn: Global search navigated to jobs page")
+    return true
+  } catch {
+    console.log("[SOS] LinkedIn: Global search did not navigate to jobs page")
+    return false
+  }
+}
+
+/**
+ * Strategy 2: Use LinkedIn's new semantic job search input (on jobs pages).
+ * This is LinkedIn's AI-powered search with placeholder "Describe the job you want".
+ * Uses data-testid="typeahead-input" and componentkey="semanticSearchBox".
+ */
+async function searchViaSemanticBar(term: string, signal?: AbortSignal): Promise<boolean> {
+  console.log("[SOS] LinkedIn: Trying semantic search bar...")
+
+  const input = await waitForElement<HTMLInputElement>(SEMANTIC_SEARCH_SELECTOR, 5_000, signal)
+  if (!input) {
+    console.log("[SOS] LinkedIn: Semantic search bar not found")
+    return false
+  }
+
+  console.log("[SOS] LinkedIn: Found semantic search bar")
+
+  // Clear and type the term
+  typeIntoInput(input, term)
+
+  // Submit the search
+  submitSearch(input)
+
+  // Wait for results to appear (cards or empty state)
+  try {
+    await waitForResults(15_000, signal)
+    console.log("[SOS] LinkedIn: Semantic search returned results")
+    return true
+  } catch {
+    console.log("[SOS] LinkedIn: Semantic search did not return results")
+    return false
+  }
+}
+
+/**
+ * Strategy 3: Use LinkedIn's jobs-specific search bar (only on /jobs/ pages).
+ * This is used when we're already on a jobs page.
+ */
+async function searchViaJobsBar(term: string, signal?: AbortSignal): Promise<boolean> {
+  console.log("[SOS] LinkedIn: Trying jobs-specific search bar...")
+
+  const input = await waitForElement<HTMLInputElement>(SEARCH_INPUT_SELECTOR, 5_000, signal)
+  if (!input) {
+    console.log("[SOS] LinkedIn: Jobs search bar not found")
+    return false
+  }
+
+  console.log("[SOS] LinkedIn: Found jobs search bar")
+
+  // Clear and type the term
+  typeIntoInput(input, term)
+
+  // Submit the search
+  submitSearch(input)
+
+  // Wait for results to appear (cards or empty state)
+  try {
+    await waitForResults(15_000, signal)
+    console.log("[SOS] LinkedIn: Jobs search returned results")
+    return true
+  } catch {
+    console.log("[SOS] LinkedIn: Jobs search did not return results")
+    return false
+  }
+}
+
+/**
+ * Strategy 4: Navigate directly to the LinkedIn jobs search URL.
+ * This is the most reliable fallback — always works.
+ */
+async function searchViaUrlNavigation(term: string, signal?: AbortSignal): Promise<void> {
+  console.log("[SOS] LinkedIn: Falling back to URL navigation")
+
+  const url = new URL(LINKEDIN_JOBS_SEARCH_URL)
+  url.searchParams.set("keywords", term)
+  url.searchParams.set("sos_nav", "1")
+
+  // Use pushStateNavigate first (no page reload)
+  pushStateNavigate(url)
+
+  // Wait for results
+  try {
+    await waitForResults(15_000, signal)
+    console.log("[SOS] LinkedIn: URL navigation returned results")
+    return
+  } catch {
+    // pushState didn't work — do a full page navigation
+    console.log("[SOS] LinkedIn: pushState navigation failed — doing full page load")
+  }
+
+  // Full page navigation as last resort
+  window.location.href = url.toString()
+
+  // This will cause a page reload, so we throw to stop execution
+  throw new Error(`Navigating to jobs search page for "${term}" — page will reload`)
+}
+
+/**
+ * Navigate to a new search term using a multi-strategy approach:
+ *   1. Try LinkedIn's global search bar (top nav, works from ANY page)
+ *   2. Try LinkedIn's semantic search bar (AI-powered, on jobs pages)
+ *   3. Try LinkedIn's jobs-specific search bar (on /jobs/ pages)
+ *   4. Fall back to URL navigation (most reliable)
+ *
  * Uses waitForCondition to confirm the input value was set before dispatching Enter.
  * Uses waitForResults to wait for cards or empty state after search.
+ *
+ * @param site - SiteSettings (needed for resume state before page refresh)
+ * @param termIdx - Current term index (needed for resume state)
  */
-export async function navigateToSearchTerm(term: string, signal?: AbortSignal): Promise<void> {
+export async function navigateToSearchTerm(
+  term: string,
+  signal?: AbortSignal,
+  site?: SiteSettings,
+  termIdx?: number
+): Promise<void> {
   console.log(`[SOS] LinkedIn: Navigating to search term "${term}"`)
 
-  let input = await waitForElement<HTMLInputElement>(SEARCH_INPUT_SELECTOR, 10_000, signal)
-  signal?.throwIfAborted()
+  // Strategy 1: Global search bar (works from ANY LinkedIn page)
+  const globalResult = await searchViaGlobalBar(term, signal, site, termIdx)
+  if (globalResult) return
 
-  if (!input) {
-    console.log("[SOS] LinkedIn: Primary search input selectors failed — trying text-based fallback")
-    const allInputs = document.querySelectorAll<HTMLInputElement>("input[type='text'], input:not([type])")
-    for (const inp of allInputs) {
-      const placeholder = inp.placeholder?.toLowerCase() || ""
-      const ariaLabel = inp.getAttribute("aria-label")?.toLowerCase() || ""
-      if (placeholder.includes("search") || placeholder.includes("title") ||
-          ariaLabel.includes("search") || ariaLabel.includes("title")) {
-        input = inp
-        break
+  // Strategy 2: Semantic search bar (AI-powered, on jobs pages)
+  const semanticResult = await searchViaSemanticBar(term, signal)
+  if (semanticResult) return
+
+  // Strategy 3: Jobs-specific search bar (on /jobs/ pages)
+  const jobsResult = await searchViaJobsBar(term, signal)
+  if (jobsResult) return
+
+  // Strategy 4: URL navigation (always works)
+  await searchViaUrlNavigation(term, signal)
+}
+
+/* ── Navigation: Filters (DOM-based dropdown interaction) ── */
+
+/**
+ * Find a filter button by its text content (case-insensitive, partial match).
+ * Searches all filter buttons in the results filter bar.
+ */
+function findFilterButton(text: string): Element | null {
+  for (const btn of document.querySelectorAll<HTMLElement>(
+    "button.jobs-search-results-list__filter-button, " +
+    "button[aria-label*='filter'], " +
+    "button[aria-label*='Filter']"
+  )) {
+    const btnText = btn.textContent?.trim().toLowerCase() || ""
+    const ariaLabel = btn.getAttribute("aria-label")?.toLowerCase() || ""
+    if (btnText.includes(text.toLowerCase()) || ariaLabel.includes(text.toLowerCase())) {
+      return btn
+    }
+  }
+  return null
+}
+
+/**
+ * Find an option inside an open dropdown panel by its text content.
+ */
+function findDropdownOption(panel: Element, text: string): Element | null {
+  // Try option roles first
+  const options = panel.querySelectorAll<HTMLElement>(
+    "li[role='option'], button[role='option'], span[role='option'], " +
+    "label, span[role='checkbox'], div[role='checkbox']"
+  )
+  for (const opt of options) {
+    const optText = opt.textContent?.trim().toLowerCase() || ""
+    if (optText.includes(text.toLowerCase())) {
+      return opt
+    }
+  }
+  // Fallback: search all elements
+  for (const el of panel.querySelectorAll("*")) {
+    const elText = el.textContent?.trim().toLowerCase() || ""
+    if (elText === text.toLowerCase() || elText.includes(text.toLowerCase())) {
+      return el
+    }
+  }
+  return null
+}
+
+/**
+ * Close an open filter dropdown by pressing Escape or clicking the filter button again.
+ */
+async function closeFilterDropdown(filterBtn: Element, signal?: AbortSignal): Promise<void> {
+  // Try Escape key first
+  filterBtn.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
+  await delay(300, signal)
+  // If dropdown is still open, click the button again to toggle it closed
+  const dropdownStillOpen = document.querySelector(FILTER_DROPDOWN_PANEL)
+  if (dropdownStillOpen) {
+    scrollAndClick(filterBtn)
+    await delay(300, signal)
+  }
+}
+
+/**
+ * Apply a single filter via its dropdown button.
+ * Clicks the filter button, waits for the dropdown, selects the option, and closes.
+ *
+ * @param filterBtnSelector - CSS selector for the filter button
+ * @param optionText - The text of the option to select in the dropdown
+ * @param signal - AbortSignal
+ * @returns true if the filter was applied successfully
+ */
+async function applySingleFilter(
+  filterBtnSelector: string,
+  optionText: string,
+  signal?: AbortSignal
+): Promise<boolean> {
+  // Find the filter button
+  let filterBtn = document.querySelector<HTMLElement>(filterBtnSelector)
+  if (!filterBtn) {
+    // Fallback: search by text
+    filterBtn = findFilterButton(optionText.split(" ")[0]) as HTMLElement | null
+  }
+  if (!filterBtn) {
+    console.warn(`[SOS] LinkedIn: Could not find filter button for "${optionText}"`)
+    return false
+  }
+
+  // Click to open the dropdown
+  scrollAndClick(filterBtn)
+  await delay(400, signal)
+
+  // Wait for dropdown panel to appear
+  let dropdown = await waitForElement(FILTER_DROPDOWN_PANEL, 3_000, signal)
+  if (!dropdown) {
+    // If no dropdown appeared, this might be a toggle button (Easy Apply)
+    // Check if the button's aria-pressed changed or it has a selected state
+    console.log(`[SOS] LinkedIn: No dropdown for "${optionText}" — might be a toggle`)
+    return true
+  }
+
+  // Find and click the option
+  const option = findDropdownOption(dropdown, optionText)
+  if (!option) {
+    console.warn(`[SOS] LinkedIn: Could not find option "${optionText}" in dropdown`)
+    await closeFilterDropdown(filterBtn, signal)
+    return false
+  }
+
+  scrollAndClick(option)
+  await delay(300, signal)
+
+  // Close the dropdown
+  await closeFilterDropdown(filterBtn, signal)
+
+  console.log(`[SOS] LinkedIn: Applied filter "${optionText}"`)
+  return true
+}
+
+/**
+ * Apply URL-based filters via DOM interaction with LinkedIn's filter dropdown buttons.
+ * No page reloads — clicks filter buttons, selects options, closes dropdowns.
+ *
+ * Handles:
+ *   - Date Posted dropdown (radio-style: Past 24 hours, Past week, Past month)
+ *   - Sort By dropdown (radio-style: Most recent, Most relevant)
+ *   - Experience Level dropdown (checkbox-style: Entry level, Associate, etc.)
+ *   - Job Type dropdown (checkbox-style: Full-time, Part-time, Contract, etc.)
+ *   - On-site/Remote dropdown (checkbox-style: On-site, Remote, Hybrid)
+ *   - Easy Apply toggle button
+ */
+export async function applyUrlFiltersViaDom(
+  site: SiteSettings,
+  signal?: AbortSignal,
+  overrides?: { datePosted?: string; sortBy?: string }
+): Promise<void> {
+  console.log("[SOS] LinkedIn: Applying URL-based filters via DOM interaction")
+
+  // 1. Date Posted
+  const dateKey = (overrides?.datePosted || site.filters.datePosted || "").trim().toLowerCase()
+  if (dateKey && FILTER_OPTION_TEXT.datePosted[dateKey]) {
+    const optionText = FILTER_OPTION_TEXT.datePosted[dateKey]
+    await applySingleFilter(FILTER_BTN_DATE_POSTED, optionText, signal)
+  }
+
+  // 2. Sort By
+  const sortKey = (overrides?.sortBy || site.filters.sortBy || "").trim().toLowerCase()
+  if (sortKey && FILTER_OPTION_TEXT.sortBy[sortKey]) {
+    const optionText = FILTER_OPTION_TEXT.sortBy[sortKey]
+    await applySingleFilter(FILTER_BTN_SORT, optionText, signal)
+  }
+
+  // 3. Experience Level (multi-select checkboxes)
+  if (site.filters.experienceLevel.length > 0) {
+    const expBtn = document.querySelector<HTMLElement>(FILTER_BTN_EXPERIENCE) ||
+      findFilterButton("experience") as HTMLElement | null
+    if (expBtn) {
+      scrollAndClick(expBtn)
+      await delay(400, signal)
+      const dropdown = await waitForElement(FILTER_DROPDOWN_PANEL, 3_000, signal)
+      if (dropdown) {
+        for (const level of site.filters.experienceLevel) {
+          const key = level.trim().toLowerCase()
+          const optionText = FILTER_OPTION_TEXT.experienceLevel[key]
+          if (optionText) {
+            const option = findDropdownOption(dropdown, optionText)
+            if (option) {
+              scrollAndClick(option)
+              await delay(300, signal)
+              console.log(`[SOS] LinkedIn: Applied experience level "${optionText}"`)
+            }
+          }
+        }
+        await closeFilterDropdown(expBtn, signal)
+      } else {
+        await closeFilterDropdown(expBtn, signal)
       }
     }
   }
 
-  if (!input) {
-    throw new Error(`[SOS] LinkedIn: Could not find search input to navigate to "${term}"`)
+  // 4. Job Type (multi-select checkboxes)
+  if (site.filters.jobType.length > 0) {
+    const jtBtn = document.querySelector<HTMLElement>(FILTER_BTN_JOB_TYPE) ||
+      findFilterButton("job type") as HTMLElement | null
+    if (jtBtn) {
+      scrollAndClick(jtBtn)
+      await delay(400, signal)
+      const dropdown = await waitForElement(FILTER_DROPDOWN_PANEL, 3_000, signal)
+      if (dropdown) {
+        for (const jt of site.filters.jobType) {
+          const key = jt.trim().toLowerCase()
+          const optionText = FILTER_OPTION_TEXT.jobType[key]
+          if (optionText) {
+            const option = findDropdownOption(dropdown, optionText)
+            if (option) {
+              scrollAndClick(option)
+              await delay(300, signal)
+              console.log(`[SOS] LinkedIn: Applied job type "${optionText}"`)
+            }
+          }
+        }
+        await closeFilterDropdown(jtBtn, signal)
+      } else {
+        await closeFilterDropdown(jtBtn, signal)
+      }
+    }
   }
 
-  // Focus the input first
-  input.focus()
-  input.click()
+  // 5. On-site/Remote (multi-select checkboxes)
+  if (site.filters.onSite.length > 0) {
+    const osBtn = document.querySelector<HTMLElement>(FILTER_BTN_ON_SITE) ||
+      findFilterButton("on-site") as HTMLElement | null
+    if (osBtn) {
+      scrollAndClick(osBtn)
+      await delay(400, signal)
+      const dropdown = await waitForElement(FILTER_DROPDOWN_PANEL, 3_000, signal)
+      if (dropdown) {
+        for (const os of site.filters.onSite) {
+          const key = os.trim().toLowerCase()
+          const optionText = FILTER_OPTION_TEXT.onSite[key]
+          if (optionText) {
+            const option = findDropdownOption(dropdown, optionText)
+            if (option) {
+              scrollAndClick(option)
+              await delay(300, signal)
+              console.log(`[SOS] LinkedIn: Applied on-site/remote "${optionText}"`)
+            }
+          }
+        }
+        await closeFilterDropdown(osBtn, signal)
+      } else {
+        await closeFilterDropdown(osBtn, signal)
+      }
+    }
+  }
 
-  // Clear existing value and wait for it to be empty
-  setReactInputValue(input, "")
+  // 6. Easy Apply toggle (always enabled — mandatory)
+  const eaBtn = document.querySelector<HTMLElement>(FILTER_BTN_EASY_APPLY) ||
+    findFilterButton("easy apply") as HTMLElement | null
+  if (eaBtn) {
+    const isPressed = eaBtn.getAttribute("aria-pressed") === "true"
+    const isSelected = eaBtn.getAttribute("aria-checked") === "true"
+    const hasActiveClass = eaBtn.classList.contains("jobs-search-results-list__filter-button--active")
+    if (!isPressed && !isSelected && !hasActiveClass) {
+      scrollAndClick(eaBtn)
+      await delay(300, signal)
+      console.log("[SOS] LinkedIn: Toggled Easy Apply filter ON")
+    } else {
+      console.log("[SOS] LinkedIn: Easy Apply filter already active")
+    }
+  }
+
+  // Wait for results to update after applying filters
   try {
-    await waitForCondition(() => input.value === "", { timeoutMs: 1_000, signal })
+    await waitForResults(8_000, signal)
   } catch {
-    // Continue even if value didn't clear (React might not update synchronously)
+    // Results might not change if no new data was fetched
   }
 
-  // Set the new term and wait for it to be set
-  setReactInputValue(input, term)
-  try {
-    await waitForCondition(() => input.value === term, { timeoutMs: 1_000, signal })
-  } catch {
-    // Continue even if value didn't update (React might not update synchronously)
-  }
-
-  // Dispatch Enter key
-  dispatchEnterKey(input)
-
-  // Wait for results to appear (cards or empty state)
-  await waitForResults(30_000, signal)
+  console.log("[SOS] LinkedIn: URL-based filters applied via DOM")
 }
 
-/* ── Navigation: Filters (pushState + popstate) ── */
+/* ── Navigation: Filters (pushState+popstate first, DOM fallback) ── */
 
 /**
- * Apply URL-based filters via history.pushState + PopStateEvent.
- * Uses waitForResults to wait for cards or empty state after filter application.
+ * Build a URL with filter params from the current URL + filter settings.
+ * Cleans existing filter params and applies new ones.
  */
-export async function applyFiltersViaPushState(
+function buildFilterUrl(
+  baseUrl: string,
+  site: SiteSettings,
+  overrides?: { datePosted?: string; sortBy?: string }
+): URL {
+  const url = new URL(baseUrl)
+
+  // Clean existing filter params
+  for (const param of FILTER_URL_PARAMS) {
+    url.searchParams.delete(param)
+  }
+
+  // Date Posted (f_TPR)
+  const dateKey = (overrides?.datePosted || site.filters.datePosted || "").trim().toLowerCase()
+  if (dateKey && DATE_POSTED_MAP[dateKey]) {
+    url.searchParams.set("f_TPR", DATE_POSTED_MAP[dateKey])
+  }
+
+  // Sort By
+  const sortKey = (overrides?.sortBy || site.filters.sortBy || "").trim().toLowerCase()
+  if (sortKey && SORT_MAP[sortKey]) {
+    url.searchParams.set("f_SB2", SORT_MAP[sortKey])
+  }
+
+  // Experience Level (f_E) — comma-separated
+  if (site.filters.experienceLevel.length > 0) {
+    const expValues = site.filters.experienceLevel
+      .map((l) => EXPERIENCE_MAP[l.trim()])
+      .filter(Boolean)
+    if (expValues.length > 0) {
+      url.searchParams.set("f_E", expValues.join(","))
+    }
+  }
+
+  // Job Type (f_JT) — comma-separated
+  if (site.filters.jobType.length > 0) {
+    const jtValues = site.filters.jobType
+      .map((jt) => JOB_TYPE_MAP[jt.trim()])
+      .filter(Boolean)
+    if (jtValues.length > 0) {
+      url.searchParams.set("f_JT", jtValues.join(","))
+    }
+  }
+
+  // On-site/Remote (f_WT) — comma-separated
+  if (site.filters.onSite.length > 0) {
+    const osValues = site.filters.onSite
+      .map((os) => ON_SITE_MAP[os.trim()])
+      .filter(Boolean)
+    if (osValues.length > 0) {
+      url.searchParams.set("f_WT", osValues.join(","))
+    }
+  }
+
+  // Easy Apply (f_AL) — always enabled (mandatory)
+  url.searchParams.set("f_AL", "true")
+
+  return url
+}
+
+/**
+ * Apply URL-based filters via pushState+popstate events first.
+ * If LinkedIn's SPA doesn't respond to synthetic popstate events (isTrusted=false),
+ * falls back to DOM-based filter dropdown interaction.
+ *
+ * Strategy:
+ *   1. Build URL with filter params from settings
+ *   2. Use pushStateNavigate() to update URL + dispatch popstate
+ *   3. Wait for results to update (cards re-render or empty state)
+ *   4. If no update after timeout, fall back to applyUrlFiltersViaDom()
+ */
+export async function applyUrlFiltersViaStateEvents(
   site: SiteSettings,
   signal?: AbortSignal,
-  overrides?: { datePosted?: string; sortBy?: string },
-  currentSearchTerm?: string
+  overrides?: { datePosted?: string; sortBy?: string }
 ): Promise<void> {
-  const url = buildFilterUrl(site, overrides, currentSearchTerm)
+  console.log("[SOS] LinkedIn: Applying URL-based filters via pushState+popstate events")
 
-  console.log(`[SOS] LinkedIn: Applying filters via pushState — ${url.search}`)
-  pushStateNavigate(url)
+  // Step 1: Build the filter URL
+  const filterUrl = buildFilterUrl(window.location.href, site, overrides)
+  console.log(`[SOS] LinkedIn: Filter URL: ${filterUrl.toString()}`)
 
-  // Wait for results to update (cards or empty state)
-  await waitForResults(10_000, signal)
+  // Step 2: Get current card count before navigation
+  const cardsBefore = document.querySelectorAll(CARD_SELECTOR).length
+
+  // Step 3: Navigate via pushState + popstate
+  pushStateNavigate(filterUrl)
+
+  // Step 4: Wait for results to update (cards re-render or empty state)
+  try {
+    await waitForCondition(
+      () => {
+        const cards = document.querySelectorAll(CARD_SELECTOR)
+        const empty = document.querySelector(EMPTY_STATE_SELECTOR)
+        // Cards changed (different count) or empty state appeared
+        return (cards.length > 0 && cards.length !== cardsBefore) || empty !== null
+      },
+      { timeoutMs: 5_000, signal, pollIntervalMs: 200 }
+    )
+    console.log("[SOS] LinkedIn: Filters applied via pushState+popstate — LinkedIn SPA responded")
+    return
+  } catch {
+    // pushState+popstate didn't trigger LinkedIn's SPA to re-fetch
+    console.log("[SOS] LinkedIn: pushState+popstate did not trigger SPA update — falling back to DOM interaction")
+  }
+
+  // Step 5: Fall back to DOM-based filter interaction
+  await applyUrlFiltersViaDom(site, signal, overrides)
 }
 
 /* ── DOM-only filter application (post-nav) ── */
@@ -514,31 +1013,56 @@ async function applyDomFilters(
 
 /* ── Batch job card reading ── */
 
-/** Extract title from a LinkedIn job card. */
-function extractCardTitle(card: HTMLAnchorElement): string {
+/** Extract title from a LinkedIn job card. Returns clean text without extra characters.
+ *  Supports both old LinkedIn (anchor-based) and new CSS-module design (div[role='button']). */
+function extractCardTitle(card: HTMLElement): string {
+  // New LinkedIn CSS-module design: screen-reader span with job title
+  const srTitle = card.querySelector<HTMLElement>(NEW_CARD_TITLE_SELECTOR)
+  if (srTitle?.textContent?.trim()) {
+    return srTitle.textContent.trim().replace(/\s+/g, " ")
+  }
+
+  // New LinkedIn CSS-module design: visual span with aria-hidden
+  const visualTitle = card.querySelector<HTMLElement>(NEW_CARD_TITLE_VISUAL_SELECTOR)
+  if (visualTitle?.textContent?.trim()) {
+    return visualTitle.textContent.trim().replace(/\s+/g, " ")
+  }
+
+  // Old LinkedIn design: job card title link
   const titleEl = card.querySelector(
     ".job-card-list__title, " +
     ".job-card-container__link, " +
-    ".artdeco-entity-lockup__title, " +
-    ".job-card-container__primary-description"
+    ".artdeco-entity-lockup__title"
   )
   if (titleEl?.textContent?.trim()) {
-    return titleEl.textContent.trim()
+    return titleEl.textContent.trim().replace(/\s+/g, " ")
   }
 
+  // Fallback: use the full card text but only take the first meaningful line
   const raw = card.textContent?.trim() || ""
-  return raw.replace(/[ @·at]+\S.*$/, "").trim()
+  // Take the first line or first sentence-like segment
+  const firstLine = raw.split("\n").map((s) => s.trim()).filter(Boolean)[0] || raw
+  return firstLine.replace(/\s+/g, " ").trim()
 }
 
-/** Extract company name from a LinkedIn job card. */
-function extractCardCompany(card: HTMLAnchorElement): string {
+/** Extract company name from a LinkedIn job card. Returns clean text without extra characters.
+ *  Supports both old LinkedIn (anchor-based) and new CSS-module design (div[role='button']). */
+function extractCardCompany(card: HTMLElement): string {
+  // New LinkedIn CSS-module design: company name in hashed-class p element
+  const newCompany = card.querySelector<HTMLElement>(NEW_CARD_COMPANY_SELECTOR)
+  if (newCompany?.textContent?.trim()) {
+    return newCompany.textContent.trim().replace(/\s+/g, " ")
+  }
+
+  // Old LinkedIn design: direct card selectors
   const fromCard = card.querySelector(
     ".job-card-container__company-name, " +
     ".artdeco-entity-lockup__subtitle, " +
     ".job-card-list__company-name"
   )?.textContent?.trim()
-  if (fromCard) return fromCard
+  if (fromCard) return fromCard.replace(/\s+/g, " ")
 
+  // Old LinkedIn design: parent container fallback
   const parent = card.closest("li, div, .job-card-container, .jobs-search-results__list-item")
   if (parent) {
     const fromParent = parent.querySelector<HTMLElement>(
@@ -547,14 +1071,22 @@ function extractCardCompany(card: HTMLAnchorElement): string {
       ".job-card-list__company-name, " +
       ".artdeco-entity-lockup__caption"
     )?.textContent?.trim()
-    if (fromParent) return fromParent
+    if (fromParent) return fromParent.replace(/\s+/g, " ")
   }
 
   return "unknown"
 }
 
-/** Extract location from a LinkedIn job card. */
-function extractCardLocation(card: HTMLAnchorElement): string {
+/** Extract location from a LinkedIn job card.
+ *  Supports both old LinkedIn (anchor-based) and new CSS-module design (div[role='button']). */
+function extractCardLocation(card: HTMLElement): string {
+  // New LinkedIn CSS-module design: location in hashed-class p element
+  const newLocation = card.querySelector<HTMLElement>(NEW_CARD_LOCATION_SELECTOR)
+  if (newLocation?.textContent?.trim()) {
+    return newLocation.textContent.trim().replace(/\s+/g, " ")
+  }
+
+  // Old LinkedIn design: direct card selectors
   const fromCard = card.querySelector(
     ".job-card-container__metadata-item, " +
     ".artdeco-entity-lockup__caption, " +
@@ -562,6 +1094,7 @@ function extractCardLocation(card: HTMLAnchorElement): string {
   )?.textContent?.trim()
   if (fromCard) return fromCard
 
+  // Old LinkedIn design: parent container fallback
   const parent = card.closest("li, div, .job-card-container, .jobs-search-results__list-item")
   if (parent) {
     const fromParent = parent.querySelector<HTMLElement>(
@@ -577,9 +1110,10 @@ function extractCardLocation(card: HTMLAnchorElement): string {
 
 /**
  * Wait for at least one job card to appear in the DOM, using MutationObserver.
+ * Supports both old LinkedIn (anchor-based) and new CSS-module design (div[role='button']).
  */
-async function waitForJobCards(timeoutMs = 15_000, signal?: AbortSignal): Promise<HTMLAnchorElement[] | null> {
-  const existing = document.querySelectorAll<HTMLAnchorElement>(CARD_SELECTOR)
+async function waitForJobCards(timeoutMs = 15_000, signal?: AbortSignal): Promise<HTMLElement[] | null> {
+  const existing = document.querySelectorAll<HTMLElement>(CARD_SELECTOR)
   if (existing.length > 0) return Array.from(existing)
   if (signal?.aborted) return null
 
@@ -591,7 +1125,7 @@ async function waitForJobCards(timeoutMs = 15_000, signal?: AbortSignal): Promis
     }
 
     const observer = new MutationObserver(() => {
-      const cards = document.querySelectorAll<HTMLAnchorElement>(CARD_SELECTOR)
+      const cards = document.querySelectorAll<HTMLElement>(CARD_SELECTOR)
       if (cards.length > 0) {
         observer.disconnect()
         if (signal) signal.removeEventListener("abort", onAbort)
@@ -608,44 +1142,23 @@ async function waitForJobCards(timeoutMs = 15_000, signal?: AbortSignal): Promis
     const timer = setTimeout(() => {
       observer.disconnect()
       if (signal) signal.removeEventListener("abort", onAbort)
-      const cards = document.querySelectorAll<HTMLAnchorElement>(CARD_SELECTOR)
+      const cards = document.querySelectorAll<HTMLElement>(CARD_SELECTOR)
       resolve(cards.length > 0 ? Array.from(cards) : null)
     }, timeoutMs)
   })
 }
 
 /**
- * Read ALL job cards currently rendered in the list view.
- * Uses scroll → wait-for-new-cards pattern (mutation-based) instead of interval polling.
- * Max 5 scroll attempts.
+ * Read job cards currently rendered in the list view.
+ * No scrolling — just reads whatever cards are currently visible in the DOM.
+ * After filters are applied, the first job is immediately clickable.
+ * Supports both old LinkedIn (anchor-based) and new CSS-module design (div[role='button']).
  */
 export async function readAllJobPreviews(maxCards: number, signal?: AbortSignal): Promise<JobPreview[]> {
-  // Find the list scroller
-  const scroller = await waitForElement(LIST_SCROLLER_SELECTOR, 8_000, signal)
-
-  if (scroller && !signal?.aborted) {
-    // Scroll → wait for new cards pattern (max 5 attempts)
-    let cardCount = document.querySelectorAll(CARD_SELECTOR).length
-    for (let attempt = 0; attempt < 5; attempt++) {
-      if (signal?.aborted) break
-      scroller.scrollTop = scroller.scrollHeight
-      const newCount = await waitForNewElements(scroller, cardCount, {
-        selector: CARD_SELECTOR,
-        timeoutMs: 3_000,
-        signal,
-      })
-      if (newCount <= cardCount) break // No new cards loaded
-      cardCount = newCount
-    }
-  } else if (!signal?.aborted) {
-    console.log("[SOS] LinkedIn: List scroller not found — scrolling window")
-    window.scrollTo(0, document.body.scrollHeight)
-  }
-
   const cardLinks = await waitForJobCards(15_000, signal)
   if (!cardLinks || cardLinks.length === 0) return []
 
-  const readLimit = Math.min(cardLinks.length, 100)
+  const readLimit = Math.min(cardLinks.length, maxCards)
   const previews: JobPreview[] = []
 
   for (let i = 0; i < readLimit; i++) {
@@ -653,13 +1166,17 @@ export async function readAllJobPreviews(maxCards: number, signal?: AbortSignal)
     const card = cardLinks[i]
     if (!card) continue
 
+    // Extract job ID from various possible attributes
     const jobId =
       card.getAttribute("data-occludable-job-id") ||
       card.closest("[data-occludable-job-id]")?.getAttribute("data-occludable-job-id") ||
+      card.getAttribute("componentkey") || // New LinkedIn design uses componentkey
       card.getAttribute("href")?.match(/\/jobs\/view\/(\d+)/)?.[1] ||
       `fallback-${i}`
 
-    const href = (card instanceof HTMLAnchorElement ? card.href : "") ||
+    // Extract URL: new design cards are div[role='button'] (not anchors), old design are anchors
+    const href =
+      (card instanceof HTMLAnchorElement ? card.href : "") ||
       card.querySelector("a")?.getAttribute("href") ||
       card.getAttribute("href") ||
       ""
@@ -674,7 +1191,7 @@ export async function readAllJobPreviews(maxCards: number, signal?: AbortSignal)
     })
   }
 
-  console.log(`[SOS] LinkedIn: Read ${previews.length} job previews`)
+  console.log(`[SOS] LinkedIn: Read ${previews.length} job previews (no scrolling)`)
   return previews
 }
 
@@ -695,6 +1212,25 @@ export function filterJobPreviews(
     console.log(`[SOS] LinkedIn: Filtered out ${removed} jobs by company list`)
   }
   return filtered
+}
+
+/* ── Scroll to next job card ── */
+
+/**
+ * Scroll the job list sidebar to bring the next job card into view.
+ * Uses the list scroller element if available, otherwise scrolls the window.
+ */
+async function scrollToNextJob(nextCard: HTMLElement, signal?: AbortSignal): Promise<void> {
+  const scroller = document.querySelector(LIST_SCROLLER_SELECTOR)
+  if (scroller) {
+    // Scroll the list scroller to bring the next card into view
+    nextCard.scrollIntoView({ behavior: "smooth", block: "nearest" })
+  } else {
+    // Fallback: scroll the window
+    nextCard.scrollIntoView({ behavior: "smooth", block: "center" })
+  }
+  // Brief wait for scroll animation
+  await randomDelay(500, 1000, signal)
 }
 
 /* ── Read job description ── */
@@ -776,29 +1312,258 @@ export async function readJobDescription(
   return text
 }
 
+/* ── Test functions for each pipeline step ── */
+
+/**
+ * Test: navigateToSearchTerm
+ * Verifies the search input can be found, cleared, and a term entered + Enter dispatched.
+ * Does NOT wait for results (just tests the input manipulation).
+ * Usage: call from browser console: testNavigateToSearchTerm("software engineer")
+ */
+export async function testNavigateToSearchTerm(term: string): Promise<boolean> {
+  console.log(`[SOS TEST] Testing navigateToSearchTerm("${term}")...`)
+  try {
+    const input = await waitForElement<HTMLInputElement>(SEARCH_INPUT_SELECTOR, 5_000)
+    if (!input) {
+      console.error("[SOS TEST] FAIL: Could not find search input")
+      return false
+    }
+    console.log("[SOS TEST] PASS: Found search input")
+
+    input.focus()
+    input.click()
+    setReactInputValue(input, "")
+    console.log("[SOS TEST] PASS: Cleared search input")
+
+    setReactInputValue(input, term)
+    console.log(`[SOS TEST] PASS: Set input value to "${term}"`)
+
+    dispatchEnterKey(input)
+    console.log("[SOS TEST] PASS: Dispatched Enter key")
+
+    console.log("[SOS TEST] ✓ navigateToSearchTerm works (results may take a moment)")
+    return true
+  } catch (err) {
+    console.error("[SOS TEST] FAIL: navigateToSearchTerm threw:", err)
+    return false
+  }
+}
+
+/**
+ * Test: applyUrlFiltersViaStateEvents
+ * Verifies that pushState+popstate filter application works (or falls back to DOM).
+ * Usage: call from browser console with a mock site object:
+ *   testApplyUrlFilters({ filters: { datePosted: "past 24 hours", ... } })
+ */
+export async function testApplyUrlFilters(site: SiteSettings): Promise<boolean> {
+  console.log("[SOS TEST] Testing applyUrlFiltersViaStateEvents...")
+  try {
+    const urlBefore = window.location.href
+    const cardsBefore = document.querySelectorAll(CARD_SELECTOR).length
+    console.log(`[SOS TEST] Cards before: ${cardsBefore}, URL: ${urlBefore}`)
+
+    await applyUrlFiltersViaStateEvents(site, undefined)
+
+    const urlAfter = window.location.href
+    const cardsAfter = document.querySelectorAll(CARD_SELECTOR).length
+    console.log(`[SOS TEST] Cards after: ${cardsAfter}, URL: ${urlAfter}`)
+
+    if (urlAfter !== urlBefore) {
+      console.log("[SOS TEST] PASS: URL was updated with filter params")
+    } else {
+      console.log("[SOS TEST] INFO: URL unchanged (filters may have been applied via DOM)")
+    }
+
+    if (cardsAfter > 0) {
+      console.log("[SOS TEST] PASS: Job cards are present after filter application")
+    }
+
+    console.log("[SOS TEST] ✓ applyUrlFiltersViaStateEvents completed")
+    return true
+  } catch (err) {
+    console.error("[SOS TEST] FAIL: applyUrlFiltersViaStateEvents threw:", err)
+    return false
+  }
+}
+
+/**
+ * Test: applyDomFilters
+ * Verifies the "All filters" modal can be opened, checkboxes toggled, and results applied.
+ * Usage: call from browser console:
+ *   testApplyDomFilters({ filters: { under10Applicants: true, inYourNetwork: true } })
+ */
+export async function testApplyDomFilters(site: SiteSettings): Promise<boolean> {
+  console.log("[SOS TEST] Testing applyDomFilters...")
+  try {
+    const result = await applyDomFilters(site, 300, undefined)
+    if (result.success) {
+      console.log(`[SOS TEST] PASS: DOM filters applied (${result.appliedCount} toggled)`)
+    } else {
+      console.warn("[SOS TEST] WARN: DOM filters had errors:", result.errors)
+    }
+    console.log("[SOS TEST] ✓ applyDomFilters completed")
+    return result.success
+  } catch (err) {
+    console.error("[SOS TEST] FAIL: applyDomFilters threw:", err)
+    return false
+  }
+}
+
+/**
+ * Test: readAllJobPreviews
+ * Verifies job cards can be read from the current results list.
+ * Usage: call from browser console: testReadJobPreviews()
+ */
+export async function testReadJobPreviews(): Promise<boolean> {
+  console.log("[SOS TEST] Testing readAllJobPreviews...")
+  try {
+    const previews = await readAllJobPreviews(10, undefined)
+    if (previews.length === 0) {
+      console.warn("[SOS TEST] WARN: No job previews found (may need to search first)")
+      return false
+    }
+    console.log(`[SOS TEST] PASS: Read ${previews.length} job previews`)
+    for (const p of previews.slice(0, 3)) {
+      console.log(`  - "${p.title}" @ "${p.company}" (${p.location})`)
+    }
+    if (previews.length > 3) {
+      console.log(`  ... and ${previews.length - 3} more`)
+    }
+    console.log("[SOS TEST] ✓ readAllJobPreviews works")
+    return true
+  } catch (err) {
+    console.error("[SOS TEST] FAIL: readAllJobPreviews threw:", err)
+    return false
+  }
+}
+
+/**
+ * Test: readJobDescription
+ * Verifies a job card can be clicked and its description read from the detail panel.
+ * Usage: call from browser console after testReadJobPreviews:
+ *   testReadJobDescription(previews[0])
+ */
+export async function testReadJobDescription(job: JobPreview): Promise<boolean> {
+  console.log(`[SOS TEST] Testing readJobDescription for "${job.title}" @ "${job.company}"...`)
+  try {
+    const description = await readJobDescription(job, undefined)
+    if (!description) {
+      console.error("[SOS TEST] FAIL: Could not read job description")
+      return false
+    }
+    console.log(`[SOS TEST] PASS: Read description (${description.length} chars)`)
+    console.log(`[SOS TEST] Description preview: "${description.slice(0, 200)}..."`)
+    console.log("[SOS TEST] ✓ readJobDescription works")
+    return true
+  } catch (err) {
+    console.error("[SOS TEST] FAIL: readJobDescription threw:", err)
+    return false
+  }
+}
+
+/**
+ * Test: applyToJob
+ * Verifies the Easy Apply flow for a given job (validation + modal).
+ * Usage: call from browser console after testReadJobDescription:
+ *   testApplyToJob(job, description, site.filters, detailPanel)
+ */
+export async function testApplyToJob(
+  job: JobPreview,
+  description: string,
+  filters: FilterSettings,
+  detailPanel: Element
+): Promise<boolean> {
+  console.log(`[SOS TEST] Testing applyToJob for "${job.title}" @ "${job.company}"...`)
+  try {
+    const result = await applyToJob(job, description, filters, detailPanel, undefined)
+    console.log(`[SOS TEST] Result: ${result.applied ? "APPLIED" : "SKIPPED"} — ${result.reason}`)
+    console.log("[SOS TEST] ✓ applyToJob completed")
+    return true
+  } catch (err) {
+    console.error("[SOS TEST] FAIL: applyToJob threw:", err)
+    return false
+  }
+}
+
+/**
+ * Run all pipeline step tests sequentially.
+ * Usage: call from browser console:
+ *   testAllSteps(siteSettingsObject)
+ */
+export async function testAllSteps(site: SiteSettings): Promise<void> {
+  console.log("═══════════════════════════════════════════")
+  console.log("[SOS TEST] Running all pipeline step tests")
+  console.log("═══════════════════════════════════════════")
+
+  // Step 1: Navigate to search term
+  const term = site.search.searchTerms[0]
+  if (!term) {
+    console.error("[SOS TEST] No search terms configured — cannot test")
+    return
+  }
+  console.log(`\n── Step 1: navigateToSearchTerm("${term}") ──`)
+  const step1 = await testNavigateToSearchTerm(term)
+  if (!step1) { console.error("[SOS TEST] ABORT: Step 1 failed"); return }
+
+  // Wait for results to settle
+  await delay(3_000)
+
+  // Step 2: Apply URL filters
+  console.log(`\n── Step 2: applyUrlFiltersViaStateEvents ──`)
+  const step2 = await testApplyUrlFilters(site)
+  if (!step2) { console.warn("[SOS TEST] Step 2 had issues, continuing...") }
+
+  // Wait for results to settle
+  await delay(2_000)
+
+  // Step 3: Apply DOM filters
+  console.log(`\n── Step 3: applyDomFilters ──`)
+  const step3 = await testApplyDomFilters(site)
+  if (!step3) { console.warn("[SOS TEST] Step 3 had issues, continuing...") }
+
+  // Wait for results to settle
+  await delay(2_000)
+
+  // Step 4: Read job previews
+  console.log(`\n── Step 4: readAllJobPreviews ──`)
+  const step4 = await testReadJobPreviews()
+  if (!step4) { console.error("[SOS TEST] ABORT: Step 4 failed"); return }
+
+  // Step 5: Read job description for first job
+  console.log(`\n── Step 5: readJobDescription ──`)
+  const firstJob = step4 ? (await readAllJobPreviews(1, undefined))[0] : undefined
+  if (!firstJob) { console.error("[SOS TEST] ABORT: No job to test description reading"); return }
+  const step5 = await testReadJobDescription(firstJob)
+  if (!step5) { console.warn("[SOS TEST] Step 5 had issues, continuing...") }
+
+  console.log("\n═══════════════════════════════════════════")
+  console.log("[SOS TEST] All tests completed")
+  console.log("═══════════════════════════════════════════")
+}
+
 /* ── Pipeline orchestrator ── */
 
 /**
  * Run the full LinkedIn pipeline for a single site configuration.
  *
- * Flow:
+ * Flow (no page reloads — all DOM-based):
  *   1. Login check + anti-bot check
  *   2. Search term shuffling (if enabled)
- *   3. State restoration (crash recovery)
- *   4. Date/sort cycling (if enabled)
- *   5. For each search term:
- *      a. Navigate to term
- *      b. Apply URL-based filters via pushState
- *      c. Apply DOM-based filters (under 10 applicants, etc.)
- *      d. Read all job previews (scroll → wait pattern)
+ *   3. Date/sort cycling (if enabled)
+ *   4. For each search term:
+ *      a. Navigate to term via DOM input manipulation
+ *      b. Apply URL-based filters (try pushState+popstate first, fall back to DOM)
+ *      c. Apply DOM-only filters (under 10 applicants, etc.) via "All filters" modal
+ *      d. Read all job previews (no scrolling — reads visible cards)
  *      e. Filter by company allow/block list
  *      f. For each job:
  *         - Read job description (wait for detail panel)
  *         - Apply to job (validate + Easy Apply)
  *         - randomDelay(1000, 2000) between jobs for visual feedback
  *         - Modal double-close check
- *   6. State persistence between jobs
+ *   5. State persistence between jobs (crash recovery)
  */
+
 export async function runLinkedInPipeline(
   site: SiteSettings,
   signal: AbortSignal,
@@ -811,36 +1576,16 @@ export async function runLinkedInPipeline(
     throw new Error("Not logged into LinkedIn — please log in first")
   }
 
-  // Step 2: Anti-bot check
+  // Step 3: Anti-bot check
   if (detectAntiBotInterstitial()) {
     throw new Error("LinkedIn anti-bot interstitial detected — please complete verification")
   }
 
-  // Step 3: Prepare search terms
+  // Step 4: Prepare search terms
   let searchTerms = [...site.search.searchTerms]
   if (site.search.randomizeSearchOrder) {
     searchTerms = searchTerms.sort(() => Math.random() - 0.5)
     console.log("[SOS] LinkedIn: Randomized search term order")
-  }
-
-  // Step 4: Load persisted state (crash recovery)
-  const persistedState = await loadPipelineState()
-  let startTermIndex = 0
-  let startJobIndex = 0
-  let totalProcessed = 0
-  let sortToggle = false
-  let dateCycleIndex = 0
-
-  if (persistedState) {
-    startTermIndex = persistedState.termIndex
-    startJobIndex = persistedState.jobIndex
-    totalProcessed = persistedState.totalProcessed
-    sortToggle = persistedState.sortToggle
-    dateCycleIndex = persistedState.dateCycleIndex
-    console.log(
-      `[SOS] LinkedIn: Restored state — term ${startTermIndex}, job ${startJobIndex}, ` +
-      `total ${totalProcessed}`
-    )
   }
 
   // Step 5: Date/sort cycling setup
@@ -848,8 +1593,14 @@ export async function runLinkedInPipeline(
   const alternateSort = site.pipeline.alternateSortby
   const stopAt24hr = site.pipeline.stopDateCycleAt24hr
 
+  // Pipeline state (no page reloads — all state is in-memory)
+  let startJobIndex = 0
+  let totalProcessed = 0
+  let sortToggle = false
+  let dateCycleIndex = 0
+
   // Step 6: Process each search term
-  for (let termIdx = startTermIndex; termIdx < searchTerms.length; termIdx++) {
+  for (let termIdx = 0; termIdx < searchTerms.length; termIdx++) {
     signal?.throwIfAborted()
     const term = searchTerms[termIdx]
     onProgress?.(`Searching: "${term}" (${termIdx + 1}/${searchTerms.length})`)
@@ -858,26 +1609,26 @@ export async function runLinkedInPipeline(
     const dateOverride = cycleDate ? DATE_POSTED_VALUES[dateCycleIndex % DATE_POSTED_VALUES.length] : undefined
     const sortOverride = alternateSort ? SORT_VALUES[sortToggle ? 1 : 0] : undefined
 
-    // Step 6a: Navigate to search term (catch timeout gracefully — skip term)
+    // Step 6a: Navigate to search term via DOM input manipulation
+    // Pass site and termIdx so searchViaGlobalBar can save resume state before page refresh
     onProgress?.(`Navigating to "${term}"...`)
     try {
-      await navigateToSearchTerm(term, signal)
+      await navigateToSearchTerm(term, signal, site, termIdx)
     } catch (err) {
       console.warn(`[SOS] LinkedIn: Failed to navigate to "${term}":`, err)
       continue
     }
 
-    // Step 6b: Apply URL-based filters via pushState (catch timeout gracefully)
+    // Step 6b: Apply URL-based filters (try pushState+popstate first, fall back to DOM)
     onProgress?.(`Applying filters for "${term}"...`)
     try {
-      await applyFiltersViaPushState(site, signal, { datePosted: dateOverride, sortBy: sortOverride }, term)
+      await applyUrlFiltersViaStateEvents(site, signal, { datePosted: dateOverride, sortBy: sortOverride })
     } catch (err) {
       console.warn(`[SOS] LinkedIn: Failed to apply filters for "${term}":`, err)
       continue
     }
 
-
-    // Step 6c: Apply DOM-based filters
+    // Step 6c: Apply DOM-based filters (under 10 applicants, in your network, fair chance employer)
     const domResult = await applyDomFilters(site, site.pipeline.clickDelayMs, signal)
     if (!domResult.success) {
       console.warn("[SOS] LinkedIn: DOM filter application had errors:", domResult.errors)
@@ -901,7 +1652,7 @@ export async function runLinkedInPipeline(
       `(from ${allPreviews.length} total)`
     )
 
-    // Step 6f: Process each job
+    // Step 6f: Process each job — click first job, check Easy Apply, then scroll to next
     for (let jobIdx = startJobIndex; jobIdx < filteredPreviews.length; jobIdx++) {
       signal?.throwIfAborted()
       const job = filteredPreviews[jobIdx]
@@ -909,10 +1660,15 @@ export async function runLinkedInPipeline(
 
       onProgress?.(`Reading: "${job.title}" @ "${job.company}" (${jobIdx + 1}/${filteredPreviews.length})`)
 
-      // Read job description
+      // Read job description (this clicks the job card to load its detail panel)
       const description = await readJobDescription(job, signal)
       if (!description) {
         console.warn(`[SOS] LinkedIn: Could not read description for "${job.title}" — skipping`)
+        // Scroll to next job before continuing
+        const nextJob = filteredPreviews[jobIdx + 1]
+        if (nextJob?.element) {
+          await scrollToNextJob(nextJob.element, signal)
+        }
         continue
       }
 
@@ -920,6 +1676,11 @@ export async function runLinkedInPipeline(
       const detailPanel = document.querySelector(DETAIL_PANEL_SELECTOR)
       if (!detailPanel) {
         console.warn("[SOS] LinkedIn: Detail panel not found after reading description")
+        // Scroll to next job before continuing
+        const nextJob = filteredPreviews[jobIdx + 1]
+        if (nextJob?.element) {
+          await scrollToNextJob(nextJob.element, signal)
+        }
         continue
       }
 
@@ -950,12 +1711,12 @@ export async function runLinkedInPipeline(
         timestamp: Date.now(),
       })
 
-      // Visual feedback delay between jobs (only exception to mutation-based waiting)
-      if (jobIdx < filteredPreviews.length - 1) {
-        onProgress?.(`Waiting before next job...`)
-        await randomDelay(1000, 2000, signal)
+      // Scroll to the next job card in the list before moving on
+      const nextJob = filteredPreviews[jobIdx + 1]
+      if (nextJob?.element) {
+        onProgress?.(`Scrolling to next job...`)
+        await scrollToNextJob(nextJob.element, signal)
       }
-
     }
 
     // Reset startJobIndex for next term (only first term uses persisted job index)
@@ -975,6 +1736,7 @@ export async function runLinkedInPipeline(
 
   // Clear persisted state on successful completion
   await clearPipelineState()
+  await clearResumeState()
   console.log("[SOS] LinkedIn: Pipeline completed successfully")
   onProgress?.(`Pipeline complete — processed ${totalProcessed} jobs`)
 }

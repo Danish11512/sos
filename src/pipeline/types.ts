@@ -46,8 +46,8 @@ export interface JobPreview {
   company: string
   location: string
   url: string
-  /** Reference to the anchor element for subsequent click navigation */
-  element: HTMLAnchorElement
+  /** Reference to the job card element for subsequent click navigation */
+  element: HTMLElement
   /** FIX F31: Job ID for re-querying the DOM by URL */
   jobId: string
 }

@@ -13,9 +13,11 @@ import { settingsManager } from "../settings/manager"
 import { eventBus } from "../utils/event-bus"
 import type { SiteWidgetState } from "../types/ui"
 import type { AppSettings } from "../settings/sections"
-import { loadSettings } from "../utils/storage"
+import { loadSettings, loadResumeState, clearResumeState } from "../utils/storage"
 import { isOnSearchResultsPage, applyPostNavFilters, captureJobs } from "../pipeline/index"
-import { runLinkedInPipeline, navigateToSearchPage } from "../pipeline/linkedin"
+
+
+import { runLinkedInPipeline } from "../pipeline/linkedin"
 
 import { discardApplication } from "../utils/dom"
 
@@ -34,16 +36,21 @@ async function createWidget(presetId: string): Promise<void> {
   if (widgetInitializedUrl === window.location.href) return
   widgetInitializedUrl = window.location.href
 
+  // If widget already exists, update its state based on settings
   if (document.getElementById("sos-floating-widget")) {
     await settingsManager.load()
+    const missing = settingsManager.getMissingMandatoryFields(presetId)
+    const newState: SiteWidgetState = missing.length === 0 ? "ready" : "idle"
+    // Only update if the widget is in a non-running state
+    if (widget && !["running", "starting", "paused"].includes(widget.getState())) {
+      widget.setState(newState)
+    }
     return
   }
 
-  const onSearchPage = isOnSearchResultsPage(presetId)
   const missing = settingsManager.getMissingMandatoryFields(presetId)
-  const initialState: SiteWidgetState = !onSearchPage
-    ? "nav"
-    : missing.length === 0 ? "ready" : "idle"
+  const initialState: SiteWidgetState = missing.length === 0 ? "ready" : "idle"
+
 
   widget?.destroy()
   await settingsManager.load()
@@ -52,10 +59,8 @@ async function createWidget(presetId: string): Promise<void> {
     siteName: preset.name,
     siteId: preset.id,
     initialState,
-    onNavigate: () => {
-      if (presetId === "linkedin") navigateToSearchPage()
-    },
     onToggle: async (active) => {
+
       if (!active) return
 
       if (presetId === "linkedin") {
@@ -143,6 +148,50 @@ async function createWidget(presetId: string): Promise<void> {
     unsubPauseHelp()
     unsubDailyLimit()
     origDestroy()
+  }
+
+  // ── Resume check: after page refresh from "Jobs" button click ──
+  // If there's a saved resume state, auto-start the pipeline
+  if (presetId === "linkedin") {
+    const resumeState = await loadResumeState()
+    if (resumeState) {
+      console.log("[SOS] Detected resume state — auto-starting pipeline after page refresh")
+      // Clear the resume flag immediately to prevent double-start
+      await clearResumeState()
+
+      // Load settings and start the pipeline
+      await settingsManager.load()
+      const settings: AppSettings = await loadSettings()
+      const site = settings.perSite[presetId]
+      if (site && site.search.searchTerms.length > 0) {
+        // Use a small delay to let the page fully render
+        setTimeout(async () => {
+          abortController = new AbortController()
+          widget?.setState("running")
+          widget?.setProgress(`Resuming: "${resumeState.searchTerm}"...`)
+          try {
+            await runLinkedInPipeline(site, abortController.signal, (msg) => {
+              widget?.setProgress(msg)
+            })
+            widget?.setDone()
+          } catch (err: unknown) {
+            if (err instanceof Error && err.name === "AbortError") {
+              widget?.setStopped()
+            } else {
+              const msg = err instanceof Error ? err.message : String(err)
+              widget?.setError(msg)
+            }
+          } finally {
+            try {
+              discardApplication()
+            } catch (e) {
+              console.warn("[SOS] Error discarding application in finally:", e)
+            }
+            abortController = null
+          }
+        }, 2_000) // 2s delay to let LinkedIn's SPA render job results
+      }
+    }
   }
 }
 
@@ -261,13 +310,14 @@ function handleUrlChange(): void {
 export default defineContentScript({
   matches: ["*://*.linkedin.com/*", "*://*.indeed.com/*"],
   main() {
-    // Legacy pipeline resume
+    // Legacy pipeline resume (Indeed)
     if (new URLSearchParams(window.location.search).has("sos_running")) {
       runLegacyPipelineCycle()
       return
     }
 
     // Direct detection
+
     ;(async () => {
       try {
         const matched = sitePresets.find((p) =>

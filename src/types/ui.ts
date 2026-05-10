@@ -4,7 +4,6 @@
  * Visual legend:
  *   idle        — grey,  Start disabled (missing required settings)
  *   needsInfo   — grey+warn, Start disabled with validation banner
- *   nav         — blue,  "Go to Jobs" button (not on a search results page)
  *   ready       — green, Start clickable (all fields filled)
  *   starting    — blue,  pipeline initializing
  *   running     — orange, actively processing (click to stop)
@@ -16,10 +15,10 @@
 export type SiteWidgetState =
   | "idle"
   | "needsInfo"
-  | "nav"
   | "ready"
   | "starting"
   | "running"
+
   | "paused"
   | "stopped"
   | "done"
@@ -53,8 +52,7 @@ export interface FloatingWidgetOptions {
   onStop?: () => void
   /** Called when user clicks Resume while paused */
   onResume?: () => void
-  /** Called when user clicks "Go to Jobs" in nav state */
-  onNavigate?: () => void
   /** Current running state (controls button appearance) */
   initialState?: SiteWidgetState
 }
+

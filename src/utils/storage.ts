@@ -144,3 +144,62 @@ export async function clearPipelineState(): Promise<void> {
     // Ignore
   }
 }
+
+/* ── Resume state (page refresh recovery) ── */
+
+const RESUME_KEY = "sos_linkedin_resume"
+
+export interface ResumeState {
+  /** The search term that was being navigated to. */
+  searchTerm: string
+  /** Serialized SiteSettings for the pipeline. */
+  siteSettings: Record<string, unknown>
+  /** Term index in the search terms array. */
+  termIndex: number
+  /** Timestamp when saved. */
+  timestamp: number
+}
+
+/**
+ * Save resume state before a page refresh (e.g., clicking "Jobs" radio button).
+ */
+export async function saveResumeState(state: ResumeState): Promise<void> {
+  try {
+    await browser.storage.local.set({
+      [RESUME_KEY]: { ...state, timestamp: Date.now() },
+    })
+    console.log("[SOS] Saved resume state for page refresh recovery")
+  } catch (e) {
+    console.warn("[SOS] Failed to save resume state:", e)
+  }
+}
+
+/**
+ * Load resume state after a page refresh.
+ */
+export async function loadResumeState(): Promise<ResumeState | null> {
+  try {
+    const result = await browser.storage.local.get(RESUME_KEY)
+    const state = result[RESUME_KEY] as ResumeState | undefined
+    if (!state) return null
+    // Expire after 5 minutes (stale resume)
+    if (Date.now() - state.timestamp > 300_000) {
+      await clearResumeState()
+      return null
+    }
+    return state
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Clear resume state after successful recovery.
+ */
+export async function clearResumeState(): Promise<void> {
+  try {
+    await browser.storage.local.remove(RESUME_KEY)
+  } catch {
+    // Ignore
+  }
+}

@@ -42,7 +42,7 @@ export class FloatingWidget {
   private toggleLabel!: HTMLSpanElement
   private progressLine!: HTMLDivElement
   private pauseControlsEl!: HTMLElement
-  private navBtn!: HTMLButtonElement
+
 
   private form = new SettingsForm()
   private curState: SiteWidgetState = "idle"
@@ -114,6 +114,11 @@ export class FloatingWidget {
     this.showPauseControls()
   }
 
+  /** Public: get current widget state. */
+  getState(): SiteWidgetState {
+    return this.curState
+  }
+
   /** Public: set widget state. Safe: validates transition internally. */
   setState(state: SiteWidgetState): void {
     this.transitionTo(state)
@@ -158,7 +163,8 @@ export class FloatingWidget {
   }
 
   private refreshState(): void {
-    if (["nav", "running", "starting", "paused"].includes(this.curState)) return
+    if (["running", "starting", "paused"].includes(this.curState)) return
+
 
     const ready = settingsManager.getMissingMandatoryFields(this.siteId).length === 0
     if (this.curState === "needsInfo" && !ready) return
@@ -189,13 +195,8 @@ export class FloatingWidget {
     nameEl.textContent = opts.siteName
     header.appendChild(nameEl)
 
-    this.navBtn = document.createElement("button")
-    this.navBtn.className = "sos-nav-btn hidden"
-    this.navBtn.textContent = "Go to Jobs →"
-    this.navBtn.addEventListener("click", (e) => { e.stopPropagation(); this.options.onNavigate?.() })
-    header.appendChild(this.navBtn)
-
     this.toggleBtn = document.createElement("button")
+
     this.toggleBtn.className = "sos-toggle-btn sos-toggle-btn--idle"
     this.toggleDot = document.createElement("span")
     this.toggleDot.className = "sos-toggle-dot sos-toggle-dot--idle"
@@ -306,69 +307,55 @@ export class FloatingWidget {
     this.toggleDot.className = `sos-toggle-dot sos-toggle-dot--${state}`
 
     switch (state) {
-      case "nav":
-        this.navBtn.classList.remove("hidden")
-        this.toggleBtn.classList.add("hidden")
-        this.toggleLabel.textContent = "Start"
-        this.toggleBtn.disabled = false
-        this.clearPauseControls(); this.clearError(); this.clearProgress()
-        break
       case "idle":
       case "needsInfo":
-        this.navBtn.classList.add("hidden")
         this.toggleBtn.classList.remove("hidden")
         this.toggleLabel.textContent = "Start"
         this.toggleBtn.disabled = true
         if (state === "idle") { this.clearPauseControls(); this.clearError(); this.clearProgress() }
         break
       case "ready":
-        this.navBtn.classList.add("hidden")
         this.toggleBtn.classList.remove("hidden")
         this.toggleLabel.textContent = "Start"
         this.toggleBtn.disabled = false
         this.clearPauseControls(); this.clearError(); this.clearProgress()
         break
       case "starting":
-        this.navBtn.classList.add("hidden")
         this.toggleBtn.classList.remove("hidden")
         this.toggleLabel.textContent = "Starting"
         this.toggleBtn.disabled = true
         break
       case "running":
-        this.navBtn.classList.add("hidden")
         this.toggleBtn.classList.remove("hidden")
         this.toggleLabel.textContent = "Running"
         this.toggleBtn.disabled = false
         this.clearPauseControls()
         break
       case "paused":
-        this.navBtn.classList.add("hidden")
         this.toggleBtn.classList.remove("hidden")
         this.toggleLabel.textContent = "Paused"
         this.toggleBtn.disabled = true
         break
       case "stopped":
-        this.navBtn.classList.add("hidden")
         this.toggleBtn.classList.remove("hidden")
         this.toggleLabel.textContent = "Stopped"
         this.toggleBtn.disabled = true
         this.clearPauseControls()
         break
       case "done":
-        this.navBtn.classList.add("hidden")
         this.toggleBtn.classList.remove("hidden")
         this.toggleLabel.textContent = "Done ✓"
         this.toggleBtn.disabled = true
         this.clearPauseControls(); this.clearError(); this.clearProgress()
         break
       case "error":
-        this.navBtn.classList.add("hidden")
         this.toggleBtn.classList.remove("hidden")
         this.toggleLabel.textContent = "Error"
         this.toggleBtn.disabled = false
         this.clearPauseControls(); this.clearProgress()
         break
     }
+
 
     eventBus.emit("state-changed", { from, to: state, siteId: this.siteId })
     saveSiteState(this.siteId, { state, lastUpdated: Date.now(), error: this.errMsg ?? undefined })
@@ -388,9 +375,8 @@ export class FloatingWidget {
   /* ================================================================ */
 
   private async handleToggle(): Promise<void> {
-    if (this.curState === "nav") { this.options.onNavigate?.(); return }
-
     if (this.curState === "idle" || this.curState === "needsInfo") {
+
       await this.persist()
       const missing = settingsManager.getMissingMandatoryFields(this.siteId)
       if (missing.length === 0) {
