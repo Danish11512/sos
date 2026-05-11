@@ -395,9 +395,33 @@ export function removeUrlParam(name: string): void {
 }
 
 /**
+ * Save a reference to the ORIGINAL history.pushState BEFORE content.ts
+ * monkey-patches it. This lets pushStateNavigate() bypass the patched
+ * version that emits "url-changed" events, which would otherwise reset
+ * widget state mid-pipeline.
+ *
+ * We do this at module load time (parse-time), which is before
+ * content.ts runs its main() function where the patch happens.
+ * However, since both run in the same content script, the import
+ * order determines timing. To be safe, we capture the original at
+ * first call instead.
+ */
+let _origPushState: typeof history.pushState | null = null
+
+function getOrigPushState(): typeof history.pushState {
+  if (!_origPushState) {
+    _origPushState = history.pushState.bind(history)
+  }
+  return _origPushState
+}
+
+/**
  * Navigate via history.pushState + PopStateEvent to avoid page reload.
  * LinkedIn's SPA router listens for popstate to re-fetch data.
  * Saves and restores scroll position to prevent jarring jumps.
+ *
+ * Uses the ORIGINAL history.pushState (before content.ts monkey-patches it)
+ * to avoid triggering "url-changed" events that would reset widget state.
  *
  * FIX F13: Also dispatch hashchange. Monkey-patch popstate listener as fallback.
  */
@@ -413,7 +437,9 @@ export function pushStateNavigate(url: string | URL): void {
     listScrollTop: scroller?.scrollTop ?? 0,
   }
 
-  history.pushState(scrollData, "", url.toString())
+  // Use the ORIGINAL pushState to bypass content.ts's monkey-patched version
+  const origPush = getOrigPushState()
+  origPush(scrollData, "", url.toString())
 
   // FIX F13: Dispatch both popstate and hashchange for broader compatibility
   window.dispatchEvent(new PopStateEvent("popstate", { state: scrollData }))
@@ -466,20 +492,21 @@ export function dispatchEnterKey(element: Element): void {
 
 /**
  * Dispatch Escape key event with maximum compatibility.
+ * Fires both keydown and keyup for React/SPA framework compatibility.
  * FIX F63: Use composed: true for shadow DOM compatibility.
  */
 export function dispatchEscapeKey(): void {
-  document.dispatchEvent(
-    new KeyboardEvent("keydown", {
-      key: "Escape",
-      code: "Escape",
-      keyCode: 27,
-      which: 27,
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-    })
-  )
+  const eventOptions = {
+    key: "Escape",
+    code: "Escape",
+    keyCode: 27,
+    which: 27,
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+  }
+  document.dispatchEvent(new KeyboardEvent("keydown", eventOptions))
+  document.dispatchEvent(new KeyboardEvent("keyup", eventOptions))
 }
 
 /**
@@ -513,14 +540,21 @@ export function detectAntiBotInterstitial(): boolean {
 /**
  * Check if user is logged into LinkedIn.
  * FIX F3: Session/auth check.
+ * FIX: Only default to true if URL matches linkedin.com domain.
  */
 export function isLinkedInLoggedIn(): boolean {
+  // First check we're on LinkedIn
+  if (!window.location.hostname.includes("linkedin.com")) return false
+
   // Check for profile avatar (logged in indicator)
   const profileAvatar = document.querySelector(
-    "img.global-nav__me-photo, " +
-    "img[data-control-name*='profile'], " +
     ".global-nav__me-photo, " +
-    "div.profile-rail-card__avatar"
+    "img[data-control-name*='profile'], " +
+    "img.global-nav__me-photo, " +
+    "div.profile-rail-card__avatar, " +
+    ".feed-identity-module, " +
+    ".notification-packaging, " +
+    "[data-control-name*='profile_photo']"
   )
   if (profileAvatar) return true
 
@@ -528,11 +562,24 @@ export function isLinkedInLoggedIn(): boolean {
   const signInBtn = document.querySelector(
     "a[href*='login'], " +
     "a.nav__button-secondary, " +
-    "a[data-tracking-control-name*='guest_nav']"
+    "a[data-tracking-control-name*='guest_nav'], " +
+    ".sign-in-form"
   )
   if (signInBtn) return false
 
-  // Default: assume logged in (we're on LinkedIn, likely authenticated)
+  // Check for jobs search results (logged in, on jobs subdomain)
+  if (
+    window.location.pathname.includes("/jobs/") &&
+    document.querySelector(
+      ".jobs-search-results, " +
+      "div.jobs-search-two-pane__results, " +
+      ".jobs-search-results-list"
+    )
+  ) {
+    return true
+  }
+
+  // On LinkedIn domain, if we can't find either, assume logged in
   return true
 }
 

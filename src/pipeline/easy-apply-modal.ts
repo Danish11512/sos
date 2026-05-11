@@ -1036,10 +1036,15 @@ export async function closeEasyApplyModal(): Promise<boolean> {
     if (await waitForModalClose(2_000)) return true
   }
 
-  // Strategy 2: Press Escape to dismiss
+  // Strategy 2: Press Escape to dismiss (global document + modal element)
   dispatchEscapeKey()
-  document.dispatchEvent(
-    new KeyboardEvent("keyup", {
+  console.log("[SOS] LinkedIn: Dispatched Escape key to dismiss modal (strategy 2)")
+  if (await waitForModalClose(2_000)) return true
+
+  // Strategy 3: Dispatch Escape directly on the modal element (React portals capture events on the modal itself)
+  const modalEl = document.querySelector(EASY_APPLY_MODAL_SELECTOR)
+  if (modalEl) {
+    const escEvent = new KeyboardEvent("keydown", {
       key: "Escape",
       code: "Escape",
       keyCode: 27,
@@ -1048,12 +1053,13 @@ export async function closeEasyApplyModal(): Promise<boolean> {
       cancelable: true,
       composed: true,
     })
-  )
-  console.log("[SOS] LinkedIn: Dispatched Escape key to dismiss modal (strategy 2)")
-  if (await waitForModalClose(2_000)) return true
+    modalEl.dispatchEvent(escEvent)
+    console.log("[SOS] LinkedIn: Dispatched Escape key directly on modal element (strategy 3)")
+    if (await waitForModalClose(2_000)) return true
+  }
 
-  // Strategy 3: DOM-level removal
-  console.log("[SOS] LinkedIn: Modal still present — removing from DOM (strategy 3)")
+  // Strategy 4: DOM-level removal
+  console.log("[SOS] LinkedIn: Modal still present — removing from DOM (strategy 4)")
   const easyApplyModal = document.querySelector(EASY_APPLY_MODAL_SELECTOR)
   if (easyApplyModal) {
     easyApplyModal.remove()

@@ -523,6 +523,27 @@ export async function navigateToSearchTerm(
 ): Promise<void> {
   console.log(`[SOS] LinkedIn: Navigating to search term "${term}"`)
 
+  // Guard: If already on a LinkedIn jobs search results page, skip the global bar
+  // approach entirely to avoid a FULL PAGE REFRESH loop. Clicking the "Jobs" radio
+  // button in the global bar typeahead triggers a page reload, which re-runs the
+  // pipeline, which calls navigateToSearchTerm again → infinite loop.
+  const currentUrl = window.location.href.toLowerCase()
+  const onJobsSearchResults = currentUrl.includes("/jobs/search/") ||
+    (currentUrl.includes("/jobs/") && currentUrl.includes("keywords="))
+
+  if (onJobsSearchResults) {
+    console.log("[SOS] LinkedIn: Already on jobs search results page — updating keyword param via pushState")
+    try {
+      const url = new URL(window.location.href)
+      url.searchParams.set("keywords", term)
+      pushStateNavigate(url)
+      await waitForResults(10_000, signal)
+      return
+    } catch (err) {
+      console.warn("[SOS] LinkedIn: URL param update failed — falling back to search strategies", err)
+    }
+  }
+
   // Strategy 1: Global search bar (works from ANY LinkedIn page)
   const globalResult = await searchViaGlobalBar(term, signal, site, termIdx)
   if (globalResult) return
@@ -1567,7 +1588,8 @@ export async function testAllSteps(site: SiteSettings): Promise<void> {
 export async function runLinkedInPipeline(
   site: SiteSettings,
   signal: AbortSignal,
-  onProgress?: (msg: string) => void
+  onProgress?: (msg: string) => void,
+  startTermIndex: number = 0
 ): Promise<void> {
   console.log("[SOS] LinkedIn: Pipeline started")
 
@@ -1600,7 +1622,8 @@ export async function runLinkedInPipeline(
   let dateCycleIndex = 0
 
   // Step 6: Process each search term
-  for (let termIdx = 0; termIdx < searchTerms.length; termIdx++) {
+  // startTermIndex > 0 means resume after page refresh — skip already-processed terms
+  for (let termIdx = startTermIndex; termIdx < searchTerms.length; termIdx++) {
     signal?.throwIfAborted()
     const term = searchTerms[termIdx]
     onProgress?.(`Searching: "${term}" (${termIdx + 1}/${searchTerms.length})`)

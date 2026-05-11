@@ -25,6 +25,8 @@ import { discardApplication } from "../utils/dom"
 let widget: FloatingWidget | null = null
 let widgetInitializedUrl = ""
 let abortController: AbortController | null = null
+/** Track whether the pipeline is actively running to avoid widget resets. */
+let pipelineActive = false
 
 /* ── Widget creation ── */
 
@@ -73,6 +75,7 @@ async function createWidget(presetId: string): Promise<void> {
         }
 
         abortController = new AbortController()
+        pipelineActive = true
         widget?.setState("running")
         try {
           await runLinkedInPipeline(site, abortController.signal, (msg) => {
@@ -87,6 +90,7 @@ async function createWidget(presetId: string): Promise<void> {
             widget?.setError(msg)
           }
         } finally {
+          pipelineActive = false
           // FIX F84: Ensure modal is discarded when pipeline stops for any reason
           try {
             discardApplication()
@@ -172,7 +176,7 @@ async function createWidget(presetId: string): Promise<void> {
           try {
             await runLinkedInPipeline(site, abortController.signal, (msg) => {
               widget?.setProgress(msg)
-            })
+            }, resumeState.termIndex)
             widget?.setDone()
           } catch (err: unknown) {
             if (err instanceof Error && err.name === "AbortError") {
@@ -299,6 +303,13 @@ let lastUrl = window.location.href
 
 function handleUrlChange(): void {
   if (window.location.href === lastUrl) return
+  // Never reset widget while pipeline is running — pushStateNavigate
+  // uses the original history.pushState to avoid triggering this,
+  // but popstate events from LinkedIn's own SPA router still fire.
+  if (pipelineActive) {
+    lastUrl = window.location.href
+    return
+  }
   lastUrl = window.location.href
   widgetInitializedUrl = ""
   const matched = sitePresets.find((p) => window.location.hostname.includes(p.urlPattern))
@@ -341,16 +352,24 @@ export default defineContentScript({
     window.addEventListener("popstate", handleUrlChange)
     eventBus.on("url-changed", handleUrlChange)
 
-    // Intercept pushState/replaceState to detect SPA nav without polling
+    // Intercept pushState/replaceState to detect SPA nav without polling.
+    // IMPORTANT: Do NOT emit url-changed when pipeline is active — the pipeline
+    // uses pushStateNavigate() which uses the ORIGINAL history.pushState to
+    // bypass this patch, but replaceState is still used for scroll restoration
+    // by LinkedIn itself.
     const origPush = history.pushState.bind(history)
     history.pushState = function (...args) {
       origPush(...args)
-      eventBus.emit("url-changed", { url: window.location.href })
+      if (!pipelineActive) {
+        eventBus.emit("url-changed", { url: window.location.href })
+      }
     }
     const origReplace = history.replaceState.bind(history)
     history.replaceState = function (...args) {
       origReplace(...args)
-      eventBus.emit("url-changed", { url: window.location.href })
+      if (!pipelineActive) {
+        eventBus.emit("url-changed", { url: window.location.href })
+      }
     }
   },
 })

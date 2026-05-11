@@ -73,3 +73,29 @@ export interface NavigationStepResult {
   /** If stuck, the label of the question that caused the block. */
   stuckOnLabel?: string
 }
+
+/* ── Pipeline error types (used by index.ts) ── */
+
+/** Structured error emitted by the pipeline orchestrator. */
+export interface PipelineError {
+  stage: string
+  message: string
+  jobIndex?: number
+  consecutiveFailures?: number
+  fatal?: boolean
+}
+
+/** Error indicating too many consecutive job failures. */
+export interface ConsecutiveFailuresError extends PipelineError {
+  consecutiveFailures: number
+}
+
+/** Error when no jobs are found. */
+export interface NoJobsError extends PipelineError {
+  stage: "captureJobs"
+}
+
+/** Error when a job times out. */
+export interface JobTimeoutError extends PipelineError {
+  stage: "jobProcessing"
+}

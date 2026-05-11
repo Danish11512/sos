@@ -36,9 +36,20 @@ export const LINKEDIN_RESULTS_SELECTOR =
  *  New design: div[role='button'][tabindex='0'] with componentkey attributes.
  *  Old design: anchor elements with job-card-list__title, etc.
  */
+/**
+ * Selector for job card elements.
+ * NEW LinkedIn CSS-module design uses div[role='button'] cards WITHIN the results list.
+ * OLD LinkedIn design uses anchor elements. Critical: every selector must scoped to
+ * the results-list container so filter buttons / dropdowns are NOT matched.
+ *
+ * The key insight: real job cards are children of the jobs-search-results list,
+ * whereas filter buttons live in the filter-bar above the list.
+ */
 export const CARD_SELECTOR =
-  /* New LinkedIn CSS-module design: clickable div cards */
-  "div[role='button'][tabindex='0'], " +
+  /* New LinkedIn CSS-module design: div[role='button'] INSIDE the results list */
+  ".jobs-search-results-list div[role='button'][tabindex='0'], " +
+  ".jobs-search-results__list div[role='button'], " +
+  "div.scaffold-layout__list div[role='button'][tabindex='0'], " +
   /* Old LinkedIn design: anchor-based cards */
   "a.job-card-list__title, " +
   "a.job-card-container__link, " +
@@ -179,39 +190,58 @@ export const EMPTY_STATE_SELECTOR =
 /* ── New LinkedIn CSS-module design selectors (2026 redesign) ── */
 
 /** Selector for the job card container wrapper in the new design. */
-export const NEW_CARD_WRAPPER_SELECTOR = "div.ba48c7a2"
+export const NEW_CARD_WRAPPER_SELECTOR =
+  "div[data-job-id], " +
+  "div[data-occludable-job-id], " +
+  "div.job-card-container"
 
 /** Selector for the job list column in the new design (LazyColumn). */
 export const NEW_LIST_COLUMN_SELECTOR =
-  "div[data-testid='lazy-column'][data-component-type='LazyColumn']"
+  "div[data-testid='lazy-column'][data-component-type='LazyColumn'], " +
+  ".jobs-search-results-list, " +
+  "div.scaffold-layout__list"
 
 /** Selector for the detail panel column in the new design. */
 export const NEW_DETAIL_COLUMN_SELECTOR =
-  "div[data-testid='lazy-column']:not([data-component-type='LazyColumn'])"
+  "div[data-testid='lazy-column']:not([data-component-type='LazyColumn']), " +
+  ".jobs-search__job-details, " +
+  "div.scaffold-layout__detail"
 
 /** Selector for job title text in new design cards (screen-reader span). */
-export const NEW_CARD_TITLE_SELECTOR = "span.e94a47cd"
+export const NEW_CARD_TITLE_SELECTOR =
+  "span[aria-hidden='true'], " +
+  "a.job-card-list__title, " +
+  "span.job-card-container__primary-description"
 
 /** Selector for job title visual text in new design cards (aria-hidden span). */
 export const NEW_CARD_TITLE_VISUAL_SELECTOR = "span[aria-hidden='true']"
 
 /** Selector for company name in new design cards. */
 export const NEW_CARD_COMPANY_SELECTOR =
-  "p._384a5d29._7c35b94f"
+  "span.job-card-container__primary-description, " +
+  "span[data-testid='company-name'], " +
+  "a.job-card-container__company-name"
 
 /** Selector for location in new design cards. */
 export const NEW_CARD_LOCATION_SELECTOR =
-  "p._384a5d29._7c35b94f.e0d2ec4d"
+  "li.job-card-container__metadata-item, " +
+  "span.job-card-container__metadata-item"
 
 /** Selector for the main workspace container in new design. */
-export const NEW_WORKSPACE_SELECTOR = "main#workspace"
+export const NEW_WORKSPACE_SELECTOR =
+  "main#workspace, " +
+  "div.scaffold-layout"
 
 /** Selector for the results header showing count in new design. */
 export const NEW_RESULTS_HEADER_SELECTOR =
-  "p._384a5d29._7c35b94f._00e11fba._49e095fc.ddae5c29"
+  "div.jobs-search-results-list__header, " +
+  "h1.jobs-search-results-list__title, " +
+  "span.jobs-search-results-list__text"
 
 /** Selector for pagination indicators in new design. */
-export const NEW_PAGINATION_SELECTOR = "div[data-testid^='pagination-indicator-']"
+export const NEW_PAGINATION_SELECTOR =
+  "div[data-testid^='pagination-indicator-'], " +
+  "div.jobs-search-results-list__pagination"
 
 /* ── Filter dropdown button selectors (top of search results) ── */
 

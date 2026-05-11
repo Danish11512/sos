@@ -274,8 +274,6 @@ export function classifyQuestion(element: Element): QuestionType {
     return "text"
   }
 
-  if (tag === "input") return "text"
-
   return "unknown"
 }
 
@@ -291,6 +289,19 @@ export function classifyQuestion(element: Element): QuestionType {
  */
 export function extractLabel(element: Element): string {
   const el = element as HTMLElement
+
+  // 0. Closest preceding heading (h1-h6) in the same section/fieldset/form — highest context
+  const section = el.closest("fieldset, section, form, [role='group'], [role='region']")
+  if (section) {
+    const heading = section.querySelector("legend, h1, h2, h3, h4, h5, h6, [role='heading']")
+    if (heading?.textContent?.trim()) {
+      const headingText = heading.textContent.trim()
+      // Only use as primary if element itself is inside a group (radio/checkbox)
+      if (el.closest("fieldset") || el.closest("[role='radiogroup']") || el.closest("[role='group']")) {
+        return headingText
+      }
+    }
+  }
 
   // 1. aria-label
   const ariaLabel = el.getAttribute("aria-label")
@@ -335,7 +346,7 @@ export function extractLabel(element: Element): string {
     prev = prev.previousElementSibling
   }
 
-  // 7. Look up the fieldset/group heading for radio/checkbox groups
+  // 7. Look up the fieldset/group heading for radio/checkbox groups (fallback if step 0 didn't return)
   const fieldset = el.closest("fieldset")
   if (fieldset) {
     const legend = fieldset.querySelector("legend")
