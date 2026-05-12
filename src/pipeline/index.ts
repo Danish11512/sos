@@ -148,40 +148,17 @@ export async function runPipeline(siteId: string): Promise<ApplyFiltersResult> {
   emitProgress("applying", `Starting per-job loop (up to ${maxJobs})…`)
 
   for (let i = 0; i < maxJobs; i++) {
-    const jobSignal = timeoutSignal(30_000)
+    // Per-job processing is delegated to site-specific pipelines
+    // (runLinkedInPipeline, runIndeedPipeline) which handle their own
+    // loops internally. This orchestrator-level loop tracks overall
+    // progress and enforces the max-jobs cap.
 
-    try {
-      // Check for abort before each job
-      if (jobSignal.aborted) break
+    emitProgress("processing", `Job ${i + 1} of ${maxJobs}`, Math.round(((i) / maxJobs) * 100))
+    console.log(`[SOS] Pipeline: Processing job ${i + 1}/${maxJobs}`)
 
-      emitProgress("processing", `Job ${i + 1} of ${maxJobs}`, Math.round(((i) / maxJobs) * 100))
-      console.log(`[SOS] Pipeline: Processing job ${i + 1}/${maxJobs}`)
-
-      // ── Each job stage is called by the site-specific pipeline ──
-      // For LinkedIn this is handled inside runLinkedInPipeline (called from content.ts)
-      // For Indeed this is handled inside runIndeedPipeline
-
-      // Reset consecutive failures on success
-      consecutiveFailures = 0
-    } catch (err: any) {
-      consecutiveFailures++
-      const errMsg = err?.message ?? "Unknown error"
-      console.warn(`[SOS] Pipeline: Job ${i + 1} failed (${consecutiveFailures} consecutive failures): ${errMsg}`)
-      result.errors.push(`Job ${i + 1}: ${errMsg}`)
-
-      emitError({ stage: "jobProcessing", message: errMsg, jobIndex: i, consecutiveFailures })
-
-      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        const thresholdErr: ConsecutiveFailuresError = {
-          stage: "jobProcessing",
-          message: `Exceeded ${MAX_CONSECUTIVE_FAILURES} consecutive failures — aborting`,
-          consecutiveFailures,
-        }
-        emitError(thresholdErr)
-        result.errors.push(thresholdErr.message)
-        break
-      }
-    }
+    // Reset consecutive failures — the site-specific pipeline reports
+    // its own errors via the event bus.
+    consecutiveFailures = 0
   }
 
   emitProgress("done", "Pipeline complete", 100)
@@ -248,7 +225,8 @@ export function isOnSearchResultsPage(siteId: string): boolean {
 export async function captureJobs(siteId: string, maxJobs?: number): Promise<ScrapeJobResult> {
   switch (siteId) {
     case "linkedin":
-      return { success: false, jobs: [], errors: ["LinkedIn capture handled internally by runLinkedInPipeline"] }
+      console.warn("[SOS] Pipeline: LinkedIn capture handled internally by runLinkedInPipeline — skipping")
+      return { success: true, jobs: [], errors: [] }
     default:
       return { success: false, jobs: [], errors: [`Job capture not implemented for: ${siteId}`] }
   }

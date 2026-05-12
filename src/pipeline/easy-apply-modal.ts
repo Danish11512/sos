@@ -39,6 +39,7 @@ import {
   EASY_APPLY_BUTTON_SELECTOR,
   EXTERNAL_APPLY_SELECTOR,
   DETAIL_PANEL_SELECTOR,
+  CARD_SELECTOR,
 } from "./linkedin-constants"
 
 /* ── Constants ── */
@@ -409,11 +410,12 @@ function findNavigationButton(
 
   for (const btn of buttons) {
     const text = btn.textContent?.trim().toLowerCase() || ""
-    // FIX F56: Also check aria-label for non-English interfaces
+    // FIX F56: Also match aria-label for non-English LinkedIn interfaces.
+    // Prefer aria-label for routing since it's often in English even on localized UIs.
     const ariaLabel = btn.getAttribute("aria-label")?.toLowerCase() || ""
     if (text.includes("next") || text.includes("review") || text.includes("submit") || text.includes("continue") ||
         ariaLabel.includes("next") || ariaLabel.includes("review") || ariaLabel.includes("submit") || ariaLabel.includes("continue")) {
-      return { text: text || ariaLabel, element: btn }
+      return { text: ariaLabel || text, element: btn }
     }
   }
 
@@ -424,7 +426,7 @@ function findNavigationButton(
     const ariaLabel = btn.getAttribute("aria-label")?.toLowerCase() || ""
     if (text === "next" || text === "review" || text === "submit" || text === "continue" ||
         ariaLabel === "next" || ariaLabel === "review" || ariaLabel === "submit" || ariaLabel === "continue") {
-      return { text: text || ariaLabel, element: btn }
+      return { text: ariaLabel || text, element: btn }
     }
   }
 
@@ -452,9 +454,11 @@ async function clickSubmitApplication(
   scrollAndClick(submitBtn)
 
   // FIX F60: Use Promise.race to handle both confirmation modal and signal abort
+  // The delay is a safety net — the MutationObserver should win normally.
+  // Increased from 2s to 5s to avoid the delay winning before the modal appears.
   try {
     await Promise.race([
-      delay(2_000, signal),
+      delay(5_000, signal),
       new Promise<void>((resolve) => {
         // Wait for confirmation modal to appear
         const observer = new MutationObserver(() => {
@@ -469,11 +473,11 @@ async function clickSubmitApplication(
           }
         })
         observer.observe(document.body, { childList: true, subtree: true })
-        // Fallback timeout
+        // Fallback timeout (equal to the race delay)
         setTimeout(() => {
           observer.disconnect()
           resolve()
-        }, 2_000)
+        }, 5_000)
       }),
     ])
   } catch {
@@ -1077,9 +1081,18 @@ export async function closeEasyApplyModal(): Promise<boolean> {
     document.body.style.position = originalBodyPosition
   }
 
+  // Click the detail panel to re-trigger LinkedIn's state
   const detailPanel = document.querySelector(DETAIL_PANEL_SELECTOR)
   if (detailPanel) {
     detailPanel.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+  }
+
+  // Click a nearby job card to re-trigger LinkedIn's detail panel state
+  // after forced DOM removal (React may not have cleaned up its event handlers).
+  const jobCard = document.querySelector<HTMLElement>(CARD_SELECTOR)
+  if (jobCard) {
+    jobCard.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    console.log("[SOS] LinkedIn: Clicked nearby job card to re-trigger detail panel")
   }
 
   const gone = !document.querySelector(EASY_APPLY_MODAL_SELECTOR)
