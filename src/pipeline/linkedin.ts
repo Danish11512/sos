@@ -1,12 +1,13 @@
 /**
- * LinkedIn-specific pipeline: DOM-based navigation + batch job reading.
+ * LinkedIn-specific pipeline: URL-based filter navigation + DOM toggle application.
  *
- * Navigation Strategy (no page reloads — all DOM-based):
- *   - Search terms: DOM manipulation of the search input + Enter key
- *   - URL filters (f_E, f_JT, f_WT, etc.): Try pushState+popstate events first,
- *     fall back to DOM interaction with LinkedIn's filter dropdown buttons
- *   - DOM-only toggles (under 10 applicants, in your network, fair chance employer):
- *     "All filters" modal with filter-bar toggle fallback for fair chance employer
+ * Navigation Strategy (URL-first, no page reloads):
+ *   - Search terms: URL navigation to search results page with keyword
+ *   - URL filters (f_AL, f_E, f_JT, f_WT, f_TPR, f_SB2): Embedded directly in the
+ *     navigation URL via buildFilterUrl — no separate DOM filter dropdown interaction
+ *   - Filter-bar toggles (under10Applicants, inYourNetwork): Direct radio/checkbox
+ *     toggles in the search results filter bar (NOT the "All filters" modal)
+ *   - DOM-only toggle (fairChanceEmployer): "All filters" modal via toggleCheckboxItems
  *
  * Wait Strategy (no time-based delays):
  *   - All waits use MutationObserver-based waitForCondition() instead of delay()
@@ -14,17 +15,9 @@
  *   - Only exception: randomDelay(1000, 2000) between jobs for visual feedback
  *
  * Easy Apply Strategy:
- *   - Easy Apply toggle is ALWAYS enabled (mandatory)
+ *   - Easy Apply toggle is ALWAYS enabled (mandatory, set as f_AL=true in URL)
  *   - Each job listing is checked for Easy Apply button in the detail panel
  *   - External apply jobs are skipped
- *
- * LinkedIn filter dropdown options:
- *   Date Posted: "Past 24 hours", "Past week", "Past month"
- *   Sort By: "Most recent", "Most relevant"
- *   Experience Level: "Internship", "Entry level", "Associate", "Mid-Senior level", "Director", "Executive"
- *   Job Type: "Full-time", "Part-time", "Contract", "Temporary", "Volunteer", "Internship"
- *   On-site/Remote: "On-site", "Remote", "Hybrid"
- *   Easy Apply: toggle button
  */
 
 
@@ -65,20 +58,12 @@ import {
   DATE_POSTED_VALUES,
   SORT_VALUES,
   IN_YOUR_NETWORK_RADIO_SELECTOR,
+  UNDER_10_APPLICANTS_SELECTOR,
   ALL_FILTERS_BUTTON_SELECTORS,
   SHOW_RESULTS_BUTTON_SELECTORS,
   DESCRIPTION_CONTENT_SELECTOR,
   SHOW_MORE_BUTTON_SELECTOR,
   EMPTY_STATE_SELECTOR,
-  FILTER_BTN_DATE_POSTED,
-  FILTER_BTN_EXPERIENCE,
-  FILTER_BTN_JOB_TYPE,
-  FILTER_BTN_ON_SITE,
-  FILTER_BTN_EASY_APPLY,
-  FILTER_BTN_FAIR_CHANCE,
-  FILTER_BTN_SORT,
-  FILTER_DROPDOWN_PANEL,
-  FILTER_OPTION_TEXT,
   DATE_POSTED_MAP,
   EXPERIENCE_MAP,
   JOB_TYPE_MAP,
@@ -92,7 +77,6 @@ import {
   NEW_LIST_COLUMN_SELECTOR,
   NEW_DETAIL_COLUMN_SELECTOR,
   SEARCH_RESULTS_FILTER_BAR,
-  UNDER_10_APPLICANTS_SELECTOR,
 } from "./linkedin-constants"
 
 import { fillEasyApplyModal, clickEasyApplyButton, closeEasyApplyModal } from "./easy-apply-modal"
@@ -611,15 +595,18 @@ async function searchViaJobsBar(term: string, signal?: AbortSignal): Promise<boo
 }
 
 /**
- * Strategy 4: Navigate directly to the LinkedIn jobs search results URL.
- * This is the most reliable — always works. Tried FIRST per user request:
- * "let's first route to the link that I gave you. And then we can type in
- *  the search bar to have the jobs button automatically be clicked."
+ * Strategy 4: Navigate directly to the LinkedIn jobs search results URL
+ * with all filter params included. This is the most reliable — always works.
  */
-async function searchViaUrlNavigation(term: string, signal?: AbortSignal): Promise<void> {
-  console.log("[SOS] LinkedIn: Navigating via search-results URL")
+async function searchViaUrlNavigation(
+  term: string,
+  signal?: AbortSignal,
+  site?: SiteSettings,
+  overrides?: { datePosted?: string; sortBy?: string }
+): Promise<void> {
+  console.log("[SOS] LinkedIn: Navigating via search-results URL with filter params")
 
-  const url = new URL(LINKEDIN_JOBS_SEARCH_RESULTS_URL)
+  const url = buildFilterUrl(LINKEDIN_JOBS_SEARCH_RESULTS_URL, site ?? {} as SiteSettings, overrides)
   url.searchParams.set("keywords", term)
   url.searchParams.set("sos_nav", "1")
 
@@ -662,26 +649,28 @@ async function searchViaUrlNavigation(term: string, signal?: AbortSignal): Promi
  *
  * @param site - SiteSettings (needed for resume state before page refresh)
  * @param termIdx - Current term index (needed for resume state)
+ * @param overrides - Optional date/sort cycling overrides to embed in the URL
  */
 export async function navigateToSearchTerm(
   term: string,
   signal?: AbortSignal,
   site?: SiteSettings,
-  termIdx?: number
+  termIdx?: number,
+  overrides?: { datePosted?: string; sortBy?: string }
 ): Promise<void> {
   console.log(`[SOS] LinkedIn: Navigating to search term "${term}"`)
 
   // Guard: If already on a LinkedIn jobs search results page (any /jobs/search* URL),
-  // update keyword param via pushState instead of navigating again.
+  // update keyword param AND filter params via pushState instead of navigating again.
   const currentUrl = window.location.href.toLowerCase()
   const onJobsSearchResults = currentUrl.includes("/jobs/search/") ||
     currentUrl.includes("/jobs/search-results/") ||
     (currentUrl.includes("/jobs/") && currentUrl.includes("keywords="))
 
   if (onJobsSearchResults) {
-    console.log("[SOS] LinkedIn: Already on jobs search results page — updating keyword param via pushState")
+    console.log("[SOS] LinkedIn: Already on jobs search results page — building filter URL with keyword")
     try {
-      const url = new URL(window.location.href)
+      const url = buildFilterUrl(window.location.href, site ?? {} as SiteSettings, overrides)
       url.searchParams.set("keywords", term)
       pushStateNavigate(url)
       await waitForResults(10_000, signal)
@@ -691,10 +680,10 @@ export async function navigateToSearchTerm(
     }
   }
 
-  // Strategy 1 (NEW PRIMARY): Navigate directly to the search-results URL first
+  // Strategy 1 (NEW PRIMARY): Navigate directly to the search-results URL with all filter params
   // This avoids the fragile global search bar typeahead and full page refreshes.
   try {
-    await searchViaUrlNavigation(term, signal)
+    await searchViaUrlNavigation(term, signal, site, overrides)
     return
   } catch (err) {
     // If searchViaUrlNavigation threw, it means it triggered a full page reload.
@@ -718,273 +707,14 @@ export async function navigateToSearchTerm(
   if (globalResult) return
 }
 
-/* ── Navigation: Filters (DOM-based dropdown interaction) ── */
 
-/**
- * Find a filter button by its text content (case-insensitive, partial match).
- * Searches all filter buttons in the results filter bar.
- */
-function findFilterButton(text: string): Element | null {
-  for (const btn of document.querySelectorAll<HTMLElement>(
-    "button.jobs-search-results-list__filter-button, " +
-    "button[aria-label*='filter'], " +
-    "button[aria-label*='Filter']"
-  )) {
-    const btnText = btn.textContent?.trim().toLowerCase() || ""
-    const ariaLabel = btn.getAttribute("aria-label")?.toLowerCase() || ""
-    if (btnText.includes(text.toLowerCase()) || ariaLabel.includes(text.toLowerCase())) {
-      return btn
-    }
-  }
-  return null
-}
-
-/**
- * Find an option inside an open dropdown panel by its text content.
- */
-function findDropdownOption(panel: Element, text: string): Element | null {
-  // Try option roles first
-  const options = panel.querySelectorAll<HTMLElement>(
-    "li[role='option'], button[role='option'], span[role='option'], " +
-    "label, span[role='checkbox'], div[role='checkbox']"
-  )
-  for (const opt of options) {
-    const optText = opt.textContent?.trim().toLowerCase() || ""
-    if (optText.includes(text.toLowerCase())) {
-      return opt
-    }
-  }
-  // Fallback: search all elements
-  for (const el of panel.querySelectorAll("*")) {
-    const elText = el.textContent?.trim().toLowerCase() || ""
-    if (elText === text.toLowerCase() || elText.includes(text.toLowerCase())) {
-      return el
-    }
-  }
-  return null
-}
-
-/**
- * Close an open filter dropdown by pressing Escape or clicking the filter button again.
- */
-async function closeFilterDropdown(filterBtn: Element, signal?: AbortSignal): Promise<void> {
-  // Try Escape key first
-  filterBtn.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
-  await delay(300, signal)
-  // If dropdown is still open, click the button again to toggle it closed
-  const dropdownStillOpen = document.querySelector(FILTER_DROPDOWN_PANEL)
-  if (dropdownStillOpen) {
-    scrollAndClick(filterBtn)
-    await delay(300, signal)
-  }
-}
-
-/**
- * Apply a single filter via its dropdown button.
- * Clicks the filter button, waits for the dropdown, selects the option, and closes.
- *
- * @param filterBtnSelector - CSS selector for the filter button
- * @param optionText - The text of the option to select in the dropdown
- * @param signal - AbortSignal
- * @returns true if the filter was applied successfully
- */
-async function applySingleFilter(
-  filterBtnSelector: string,
-  optionText: string,
-  signal?: AbortSignal
-): Promise<boolean> {
-  // Find the filter button
-  let filterBtn = document.querySelector<HTMLElement>(filterBtnSelector)
-  if (!filterBtn) {
-    // Fallback: search by text
-    filterBtn = findFilterButton(optionText.split(" ")[0]) as HTMLElement | null
-  }
-  if (!filterBtn) {
-    console.warn(`[SOS] LinkedIn: Could not find filter button for "${optionText}"`)
-    return false
-  }
-
-  // Click to open the dropdown
-  scrollAndClick(filterBtn)
-  await delay(400, signal)
-
-  // Wait for dropdown panel to appear
-  let dropdown = await waitForElement(FILTER_DROPDOWN_PANEL, 3_000, signal)
-  if (!dropdown) {
-    // If no dropdown appeared, this might be a toggle button (Easy Apply)
-    // Check if the button's aria-pressed changed or it has a selected state
-    console.log(`[SOS] LinkedIn: No dropdown for "${optionText}" — might be a toggle`)
-    return true
-  }
-
-  // Find and click the option
-  const option = findDropdownOption(dropdown, optionText)
-  if (!option) {
-    console.warn(`[SOS] LinkedIn: Could not find option "${optionText}" in dropdown`)
-    await closeFilterDropdown(filterBtn, signal)
-    return false
-  }
-
-  scrollAndClick(option)
-  await delay(300, signal)
-
-  // Close the dropdown
-  await closeFilterDropdown(filterBtn, signal)
-
-  console.log(`[SOS] LinkedIn: Applied filter "${optionText}"`)
-  return true
-}
-
-/**
- * Apply URL-based filters via DOM interaction with LinkedIn's filter dropdown buttons.
- * No page reloads — clicks filter buttons, selects options, closes dropdowns.
- *
- * Handles:
- *   - Date Posted dropdown (radio-style: Past 24 hours, Past week, Past month)
- *   - Sort By dropdown (radio-style: Most recent, Most relevant)
- *   - Experience Level dropdown (checkbox-style: Entry level, Associate, etc.)
- *   - Job Type dropdown (checkbox-style: Full-time, Part-time, Contract, etc.)
- *   - On-site/Remote dropdown (checkbox-style: On-site, Remote, Hybrid)
- *   - Easy Apply toggle button
- */
-export async function applyUrlFiltersViaDom(
-  site: SiteSettings,
-  signal?: AbortSignal,
-  overrides?: { datePosted?: string; sortBy?: string }
-): Promise<void> {
-  console.log("[SOS] LinkedIn: Applying URL-based filters via DOM interaction")
-
-  // 1. Date Posted
-  const dateKey = (overrides?.datePosted || site.filters.datePosted || "").trim().toLowerCase()
-  if (dateKey && FILTER_OPTION_TEXT.datePosted[dateKey]) {
-    const optionText = FILTER_OPTION_TEXT.datePosted[dateKey]
-    await applySingleFilter(FILTER_BTN_DATE_POSTED, optionText, signal)
-  }
-
-  // 2. Sort By
-  const sortKey = (overrides?.sortBy || site.filters.sortBy || "").trim().toLowerCase()
-  if (sortKey && FILTER_OPTION_TEXT.sortBy[sortKey]) {
-    const optionText = FILTER_OPTION_TEXT.sortBy[sortKey]
-    await applySingleFilter(FILTER_BTN_SORT, optionText, signal)
-  }
-
-  // 3. Experience Level (multi-select checkboxes)
-  if (site.filters.experienceLevel.length > 0) {
-    const expBtn = document.querySelector<HTMLElement>(FILTER_BTN_EXPERIENCE) ||
-      findFilterButton("experience") as HTMLElement | null
-    if (expBtn) {
-      scrollAndClick(expBtn)
-      await delay(400, signal)
-      const dropdown = await waitForElement(FILTER_DROPDOWN_PANEL, 3_000, signal)
-      if (dropdown) {
-        for (const level of site.filters.experienceLevel) {
-          const key = level.trim().toLowerCase()
-          const optionText = FILTER_OPTION_TEXT.experienceLevel[key]
-          if (optionText) {
-            const option = findDropdownOption(dropdown, optionText)
-            if (option) {
-              scrollAndClick(option)
-              await delay(300, signal)
-              console.log(`[SOS] LinkedIn: Applied experience level "${optionText}"`)
-            }
-          }
-        }
-        await closeFilterDropdown(expBtn, signal)
-      } else {
-        await closeFilterDropdown(expBtn, signal)
-      }
-    }
-  }
-
-  // 4. Job Type (multi-select checkboxes)
-  if (site.filters.jobType.length > 0) {
-    const jtBtn = document.querySelector<HTMLElement>(FILTER_BTN_JOB_TYPE) ||
-      findFilterButton("job type") as HTMLElement | null
-    if (jtBtn) {
-      scrollAndClick(jtBtn)
-      await delay(400, signal)
-      const dropdown = await waitForElement(FILTER_DROPDOWN_PANEL, 3_000, signal)
-      if (dropdown) {
-        for (const jt of site.filters.jobType) {
-          const key = jt.trim().toLowerCase()
-          const optionText = FILTER_OPTION_TEXT.jobType[key]
-          if (optionText) {
-            const option = findDropdownOption(dropdown, optionText)
-            if (option) {
-              scrollAndClick(option)
-              await delay(300, signal)
-              console.log(`[SOS] LinkedIn: Applied job type "${optionText}"`)
-            }
-          }
-        }
-        await closeFilterDropdown(jtBtn, signal)
-      } else {
-        await closeFilterDropdown(jtBtn, signal)
-      }
-    }
-  }
-
-  // 5. On-site/Remote (multi-select checkboxes)
-  if (site.filters.onSite.length > 0) {
-    const osBtn = document.querySelector<HTMLElement>(FILTER_BTN_ON_SITE) ||
-      findFilterButton("on-site") as HTMLElement | null
-    if (osBtn) {
-      scrollAndClick(osBtn)
-      await delay(400, signal)
-      const dropdown = await waitForElement(FILTER_DROPDOWN_PANEL, 3_000, signal)
-      if (dropdown) {
-        for (const os of site.filters.onSite) {
-          const key = os.trim().toLowerCase()
-          const optionText = FILTER_OPTION_TEXT.onSite[key]
-          if (optionText) {
-            const option = findDropdownOption(dropdown, optionText)
-            if (option) {
-              scrollAndClick(option)
-              await delay(300, signal)
-              console.log(`[SOS] LinkedIn: Applied on-site/remote "${optionText}"`)
-            }
-          }
-        }
-        await closeFilterDropdown(osBtn, signal)
-      } else {
-        await closeFilterDropdown(osBtn, signal)
-      }
-    }
-  }
-
-  // 6. Easy Apply toggle (always enabled — mandatory)
-  const eaBtn = document.querySelector<HTMLElement>(FILTER_BTN_EASY_APPLY) ||
-    findFilterButton("easy apply") as HTMLElement | null
-  if (eaBtn) {
-    const isPressed = eaBtn.getAttribute("aria-pressed") === "true"
-    const isSelected = eaBtn.getAttribute("aria-checked") === "true"
-    const hasActiveClass = eaBtn.classList.contains("jobs-search-results-list__filter-button--active")
-    if (!isPressed && !isSelected && !hasActiveClass) {
-      scrollAndClick(eaBtn)
-      await delay(300, signal)
-      console.log("[SOS] LinkedIn: Toggled Easy Apply filter ON")
-    } else {
-      console.log("[SOS] LinkedIn: Easy Apply filter already active")
-    }
-  }
-
-  // Wait for results to update after applying filters
-  try {
-    await waitForResults(8_000, signal)
-  } catch {
-    // Results might not change if no new data was fetched
-  }
-
-  console.log("[SOS] LinkedIn: URL-based filters applied via DOM")
-}
-
-/* ── Navigation: Filters (pushState+popstate first, DOM fallback) ── */
+/* ── Navigation: Filters (pushState+popstate) ── */
 
 /**
  * Build a URL with filter params from the current URL + filter settings.
  * Cleans existing filter params and applies new ones.
  */
-function buildFilterUrl(
+export function buildFilterUrl(
   baseUrl: string,
   site: SiteSettings,
   overrides?: { datePosted?: string; sortBy?: string }
@@ -1051,57 +781,7 @@ function buildFilterUrl(
   return url
 }
 
-/**
- * Apply URL-based filters via pushState+popstate events first.
- * If LinkedIn's SPA doesn't respond to synthetic popstate events (isTrusted=false),
- * falls back to DOM-based filter dropdown interaction.
- *
- * Strategy:
- *   1. Build URL with filter params from settings
- *   2. Use pushStateNavigate() to update URL + dispatch popstate
- *   3. Wait for results to update (cards re-render or empty state)
- *   4. If no update after timeout, fall back to applyUrlFiltersViaDom()
- */
-export async function applyUrlFiltersViaStateEvents(
-  site: SiteSettings,
-  signal?: AbortSignal,
-  overrides?: { datePosted?: string; sortBy?: string }
-): Promise<void> {
-  console.log("[SOS] LinkedIn: Applying URL-based filters via pushState+popstate events")
-
-  // Step 1: Build the filter URL
-  const filterUrl = buildFilterUrl(window.location.href, site, overrides)
-  console.log(`[SOS] LinkedIn: Filter URL: ${filterUrl.toString()}`)
-
-  // Step 2: Get current card count before navigation
-  const cardsBefore = document.querySelectorAll(CARD_SELECTOR).length
-
-  // Step 3: Navigate via pushState + popstate
-  pushStateNavigate(filterUrl)
-
-  // Step 4: Wait for results to update (cards re-render or empty state)
-  try {
-    await waitForCondition(
-      () => {
-        const cards = document.querySelectorAll(CARD_SELECTOR)
-        const empty = document.querySelector(EMPTY_STATE_SELECTOR)
-        // Cards changed (different count) or empty state appeared
-        return (cards.length > 0 && cards.length !== cardsBefore) || empty !== null
-      },
-      { timeoutMs: 5_000, signal, pollIntervalMs: 200 }
-    )
-    console.log("[SOS] LinkedIn: Filters applied via pushState+popstate — LinkedIn SPA responded")
-    return
-  } catch {
-    // pushState+popstate didn't trigger LinkedIn's SPA to re-fetch
-    console.log("[SOS] LinkedIn: pushState+popstate did not trigger SPA update — falling back to DOM interaction")
-  }
-
-  // Step 5: Fall back to DOM-based filter interaction
-  await applyUrlFiltersViaDom(site, signal, overrides)
-}
-
-/* ── "In Your Network" radio toggle (filter bar, NOT modal) ── */
+/* ── \"In Your Network\" radio toggle (filter bar, NOT modal) ── */
 
 /**
  * Toggle the "In Your Network" filter radio in the LinkedIn search results filter bar.
@@ -1142,147 +822,79 @@ export async function toggleInYourNetworkFilter(
   return true
 }
 
-/* ── "Under 10 applicants" radio toggle (filter bar, NOT modal) ── */
+/* ── Filter bar toggles (under10Applicants, inYourNetwork) ── */
 
 /**
- * Toggle the "Under 10 applicants" radio toggle directly in the LinkedIn filter bar.
- * This filter is now a radio toggle in the filter bar (NOT in the "All Filters" modal).
- *
- * DOM structure: div[role='radio'][aria-label*='Filter by Under 10 applicants']
- * containing a checkbox input and label.
- *
- * Finds the toggle, checks if already selected (via aria-checked, inner checkbox checked,
- * or active CSS class), and clicks it if not already selected.
- *
- * Standalone — exported for direct console testing:
- *   toggleUnder10ApplicantsFilter(true)
- *
- * @param enabled - Whether the filter should be active
- * @param signal  - Optional AbortSignal
- * @returns true if the filter was toggled (or already active), false on failure
+ * Toggle the "Under 10 Applicants" filter bar radio/checkbox.
+ * Similar to toggleInYourNetworkFilter — uses aria-checked and scrolling click.
  */
 export async function toggleUnder10ApplicantsFilter(
   enabled: boolean,
   signal?: AbortSignal
 ): Promise<boolean> {
-  if (!enabled) {
-    console.log("[SOS] LinkedIn: Under 10 applicants filter not enabled — skipping")
-    return true
-  }
-
-  console.log("[SOS] LinkedIn: Looking for Under 10 applicants radio toggle in filter bar...")
-
-  // Wait for the radio toggle element to appear in the DOM
-  const radioToggle = await waitForElement<HTMLElement>(
-    UNDER_10_APPLICANTS_SELECTOR,
-    6_000,
-    signal
-  )
-
-  if (!radioToggle) {
-    console.warn("[SOS] LinkedIn: Could not find Under 10 applicants radio toggle in filter bar")
+  const toggle = document.querySelector<HTMLElement>(UNDER_10_APPLICANTS_SELECTOR)
+  if (!toggle) {
+    console.warn('[SOS] LinkedIn: Could not find "Under 10 Applicants" toggle in filter bar')
     return false
   }
 
-  // Check if already selected via multiple indicators
-  const isChecked = radioToggle.getAttribute("aria-checked") === "true"
-  const innerCheckbox = radioToggle.querySelector<HTMLInputElement>(
-    "input[type='checkbox']"
-  )
-  const isCheckboxChecked = innerCheckbox?.checked === true
-  const hasActiveClass = radioToggle.classList.contains(
-    "jobs-search-results-list__filter-button--active"
-  )
-
-  if (isChecked || isCheckboxChecked || hasActiveClass) {
-    console.log("[SOS] LinkedIn: Under 10 applicants filter already active")
-    return true
-  }
-
-  // Not selected — click the toggle
-  console.log("[SOS] LinkedIn: Clicking Under 10 applicants radio toggle...")
-  scrollAndClick(radioToggle)
-
-  // Wait a brief moment for the filter to take effect
-  try {
-    await delay(500, signal)
-  } catch {
-    // Aborted
+  const isChecked = toggle.getAttribute('aria-checked') === 'true'
+  if (isChecked === enabled) {
+    console.log(`[SOS] LinkedIn: "Under 10 Applicants" already ${enabled ? 'enabled' : 'disabled'} — no action needed`)
     return false
   }
 
-  console.log("[SOS] LinkedIn: Under 10 applicants filter toggled ON")
+  scrollAndClick(toggle)
+  await delay(300, signal)
+  console.log(`[SOS] LinkedIn: Toggled "Under 10 Applicants" ${enabled ? 'ON' : 'OFF'}`)
   return true
 }
 
-/* ── DOM-only filter application (post-nav) ── */
-
 /**
- * Try to toggle a filter-bar toggle button (e.g. Easy Apply, Fair chance employer).
- * Looks for a filter bar toggle button and checks its active/selected state.
- * Returns true if the button was found and toggled on.
+ * Apply filter bar toggles for under10Applicants and inYourNetwork.
+ * These are direct radio/checkbox toggles in the search results filter bar
+ * (NOT in the "All Filters" modal). Called after navigateToSearchTerm.
  */
-async function tryToggleFilterBarButton(
-  selector: string,
-  clickDelayMs: number,
+export async function applyFilterBarToggles(
+  site: SiteSettings,
   signal?: AbortSignal
-): Promise<boolean> {
-  const btn = document.querySelector<HTMLElement>(selector) ||
-    findFilterButtonFromBar("fair chance employer") as HTMLElement | null
+): Promise<ApplyFiltersResult> {
+  const result: ApplyFiltersResult = { success: true, appliedCount: 0, errors: [] }
 
-  if (!btn) return false
-
-  const isPressed = btn.getAttribute("aria-pressed") === "true"
-  const isSelected = btn.getAttribute("aria-checked") === "true"
-  const hasActiveClass = btn.classList.contains("jobs-search-results-list__filter-button--active")
-
-  if (!isPressed && !isSelected && !hasActiveClass) {
-    scrollAndClick(btn)
-    await delay(clickDelayMs, signal)
-    console.log("[SOS] LinkedIn: Toggled filter-bar button ON")
-    return true
-  }
-
-  console.log("[SOS] LinkedIn: Filter-bar button already active")
-  return true
-}
-
-/**
- * Find a filter bar button by its text or aria-label content (case-insensitive, partial match).
- * Searches all filter buttons in the results filter bar.
- */
-function findFilterButtonFromBar(text: string): Element | null {
-  const selectors = [
-    "button.jobs-search-results-list__filter-button",
-    "button[aria-label*='filter']",
-    "button[aria-label*='Filter']",
-    "div[role='button']:has(div[aria-label*='Filter'])",
-  ]
-  for (const btn of document.querySelectorAll<HTMLElement>(selectors.join(", "))) {
-    const btnText = btn.textContent?.trim().toLowerCase() || ""
-    const ariaLabel = btn.getAttribute("aria-label")?.toLowerCase() || ""
-    // Also check inner div aria-labels (current CSS-module design)
-    const innerAriaLabel = btn.querySelector<HTMLElement>("[aria-label]")?.getAttribute("aria-label")?.toLowerCase() || ""
-    if (btnText.includes(text.toLowerCase()) ||
-        ariaLabel.includes(text.toLowerCase()) ||
-        innerAriaLabel.includes(text.toLowerCase())) {
-      return btn
+  // "In Your Network" — direct radio toggle in the filter bar
+  if (site.filters.inYourNetwork) {
+    try {
+      const toggled = await toggleInYourNetworkFilter(true, signal)
+      if (toggled) result.appliedCount++
+    } catch (err) {
+      result.errors.push(`inYourNetwork toggle failed: ${err}`)
     }
   }
-  return null
+
+  // "Under 10 Applicants" — direct radio/checkbox toggle in the filter bar
+  if (site.filters.under10Applicants) {
+    try {
+      const toggled = await toggleUnder10ApplicantsFilter(true, signal)
+      if (toggled) result.appliedCount++
+    } catch (err) {
+      result.errors.push(`under10Applicants toggle failed: ${err}`)
+    }
+  }
+
+  if (result.errors.length > 0) {
+    result.success = false
+  }
+
+  console.log(`[SOS] LinkedIn: Filter bar toggles applied (${result.appliedCount} toggled)`)
+  return result
 }
 
+/* ── DOM-only filter application (post-nav, only fairChanceEmployer) ── */
+
 /**
- * Apply DOM-only filters via the "All filters" modal or filter-bar toggles.
- *
- * Strategy (adaptive to LinkedIn's current DOM):
- *   1. "In Your Network" — handled via its own filter-bar radio toggle
- *      (see toggleInYourNetworkFilter above).
- *   2. "Under 10 applicants" — handled via its own filter-bar radio toggle
- *      (see toggleUnder10ApplicantsFilter above).
- *   3. "Fair chance employer" — first try the filter-bar toggle (like Easy Apply).
- *      If not found in the filter bar, fall back to the "All filters" modal checkbox.
- *
+ * Apply DOM-only filters via the "All filters" modal.
+ * Only handles fairChanceEmployer — under10Applicants and inYourNetwork are
+ * handled via applyFilterBarToggles (filter bar radio/checkbox toggles).
  * Uses waitForElement (MutationObserver) instead of time-based delays.
  */
 async function applyDomFilters(
@@ -1292,44 +904,17 @@ async function applyDomFilters(
 ): Promise<ApplyFiltersResult> {
   const result: ApplyFiltersResult = { success: true, appliedCount: 0, errors: [] }
 
-  // "In Your Network" is now a direct radio toggle in the filter bar — handle it separately
-  if (site.filters.inYourNetwork) {
-    const toggled = await toggleInYourNetworkFilter(true, signal)
-    if (toggled) result.appliedCount++
-  }
+  // Only fairChanceEmployer goes through the "All filters" modal now
+  const domFilters = [
+    { enabled: site.filters.fairChanceEmployer, label: "Fair chance employer" },
+  ]
 
-  // "Under 10 applicants" is now a direct radio toggle in the filter bar — handle it separately
-  const under10Result = await toggleUnder10ApplicantsFilter(
-    site.filters.under10Applicants,
-    signal
-  )
-  if (!under10Result) {
-    result.errors.push("Failed to toggle Under 10 applicants filter in filter bar")
-  }
-
-  // Try filter-bar toggle for Fair chance employer; if not found, fall back to modal
-  let fairChanceApplied = false
-  if (site.filters.fairChanceEmployer) {
-    fairChanceApplied = await tryToggleFilterBarButton(FILTER_BTN_FAIR_CHANCE, clickDelayMs, signal)
-    if (fairChanceApplied) {
-      result.appliedCount++
-      console.log("[SOS] LinkedIn: Fair chance employer toggled via filter bar")
-    } else {
-      console.log("[SOS] LinkedIn: Fair chance employer not found in filter bar — will try modal")
-    }
-  }
-
-  // Only Fair chance employer still uses the "All filters" modal (if not handled via filter bar)
-  const modalFilters = [
-    { enabled: site.filters.fairChanceEmployer && !fairChanceApplied, label: "Fair chance employer" },
-  ].filter((f) => f.enabled)
-
-  if (modalFilters.length === 0) {
-    console.log("[SOS] LinkedIn: No DOM-only filters to apply via modal (all handled via filter bar toggles)")
+  if (!domFilters.some((f) => f.enabled)) {
+    console.log("[SOS] LinkedIn: No remaining DOM-only filters to apply via modal")
     return result
   }
 
-  console.log("[SOS] LinkedIn: Opening 'All filters' modal for remaining DOM-based filters")
+  console.log("[SOS] LinkedIn: Opening 'All filters' modal for DOM-based filters")
 
   const allFiltersBtn =
     (await waitForElement(ALL_FILTERS_BUTTON_SELECTORS, 6_000, signal)) ??
@@ -1346,10 +931,6 @@ async function applyDomFilters(
     })()
 
   if (!allFiltersBtn) {
-    if (fairChanceApplied) {
-      console.log("[SOS] LinkedIn: 'All filters' button not found — fair chance already applied via filter bar")
-      return result
-    }
     result.errors.push("Could not find 'All filters' button on LinkedIn")
     result.success = false
     console.warn("[SOS] LinkedIn: ⚠️ Could not find 'All filters' button — DOM-only filters will not be applied")
@@ -1376,17 +957,13 @@ async function applyDomFilters(
   }
 
   if (!modalContainer) {
-    if (fairChanceApplied) {
-      console.log("[SOS] LinkedIn: Filter modal not found — fair chance already applied via filter bar")
-      return result
-    }
     result.errors.push("Could not find LinkedIn filter modal")
     result.success = false
     console.warn("[SOS] LinkedIn: ⚠️ Could not open filter modal — DOM-only filters skipped")
     return result
   }
 
-  result.appliedCount += await toggleCheckboxItems(modalContainer, modalFilters, clickDelayMs, signal)
+  result.appliedCount += await toggleCheckboxItems(modalContainer, domFilters, clickDelayMs, signal)
 
   const applyBtn =
     (await waitForElement(SHOW_RESULTS_BUTTON_SELECTORS, 5_000, signal)) ??
@@ -1771,38 +1348,37 @@ export async function testNavigateToSearchTerm(term: string): Promise<boolean> {
 }
 
 /**
- * Test: applyUrlFiltersViaStateEvents
- * Verifies that pushState+popstate filter application works (or falls back to DOM).
+ * Test: buildFilterUrl
+ * Verifies that filter URL params are correctly built from site settings.
  * Usage: call from browser console with a mock site object:
- *   testApplyUrlFilters({ filters: { datePosted: "past 24 hours", ... } })
+ *   testBuildFilterUrl({ filters: { datePosted: "past 24 hours", ... } })
  */
-export async function testApplyUrlFilters(site: SiteSettings): Promise<boolean> {
-  console.log("[SOS TEST] Testing applyUrlFiltersViaStateEvents...")
+export function testBuildFilterUrl(site: SiteSettings): boolean {
+  console.log("[SOS TEST] Testing buildFilterUrl...")
   try {
-    const urlBefore = window.location.href
-    const cardsBefore = document.querySelectorAll(CARD_SELECTOR).length
-    console.log(`[SOS TEST] Cards before: ${cardsBefore}, URL: ${urlBefore}`)
+    const url = buildFilterUrl(window.location.href, site, undefined)
+    console.log(`[SOS TEST] Built filter URL: ${url.toString()}`)
 
-    await applyUrlFiltersViaStateEvents(site, undefined)
-
-    const urlAfter = window.location.href
-    const cardsAfter = document.querySelectorAll(CARD_SELECTOR).length
-    console.log(`[SOS TEST] Cards after: ${cardsAfter}, URL: ${urlAfter}`)
-
-    if (urlAfter !== urlBefore) {
-      console.log("[SOS TEST] PASS: URL was updated with filter params")
+    // Verify Easy Apply is always set
+    if (url.searchParams.get("f_AL") === "true") {
+      console.log("[SOS TEST] PASS: Easy Apply (f_AL) is set to true")
     } else {
-      console.log("[SOS TEST] INFO: URL unchanged (filters may have been applied via DOM)")
+      console.warn("[SOS TEST] WARN: Easy Apply (f_AL) not set")
     }
 
-    if (cardsAfter > 0) {
-      console.log("[SOS TEST] PASS: Job cards are present after filter application")
+    if (site.filters.datePosted) {
+      const val = url.searchParams.get("f_TPR")
+      console.log(`[SOS TEST] Date posted (f_TPR): ${val || "not set"}`)
+    }
+    if (site.filters.sortBy) {
+      const val = url.searchParams.get("f_SB2")
+      console.log(`[SOS TEST] Sort by (f_SB2): ${val || "not set"}`)
     }
 
-    console.log("[SOS TEST] ✓ applyUrlFiltersViaStateEvents completed")
+    console.log("[SOS TEST] ✓ buildFilterUrl completed")
     return true
   } catch (err) {
-    console.error("[SOS TEST] FAIL: applyUrlFiltersViaStateEvents threw:", err)
+    console.error("[SOS TEST] FAIL: buildFilterUrl threw:", err)
     return false
   }
 }
@@ -1933,33 +1509,35 @@ export async function testAllSteps(site: SiteSettings): Promise<void> {
   // Wait for results to settle
   await delay(3_000)
 
-  // Step 2: Apply URL filters
-  console.log(`\n── Step 2: applyUrlFiltersViaStateEvents ──`)
-  const step2 = await testApplyUrlFilters(site)
+  // Step 2: Build filter URL
+  console.log(`\n── Step 2: buildFilterUrl ──`)
+  const step2 = testBuildFilterUrl(site)
   if (!step2) { console.warn("[SOS TEST] Step 2 had issues, continuing...") }
 
+  // Step 3: Apply filter bar toggles
+  console.log(`\n── Step 3: applyFilterBarToggles ──`)
+  const step3bar = await applyFilterBarToggles(site, undefined)
+  console.log(`[SOS TEST] Filter bar toggles result: ${step3bar.appliedCount} toggled, errors: ${step3bar.errors.length}`)
+
+  // Step 4: Apply DOM filters (fairChanceEmployer via modal)
+  console.log(`\n── Step 4: applyDomFilters ──`)
+  const step4 = await testApplyDomFilters(site)
+  if (!step4) { console.warn("[SOS TEST] Step 4 had issues, continuing...") }
+
   // Wait for results to settle
   await delay(2_000)
 
-  // Step 3: Apply DOM filters
-  console.log(`\n── Step 3: applyDomFilters ──`)
-  const step3 = await testApplyDomFilters(site)
-  if (!step3) { console.warn("[SOS TEST] Step 3 had issues, continuing...") }
+  // Step 5: Read job previews
+  console.log(`\n── Step 5: readAllJobPreviews ──`)
+  const step5 = await testReadJobPreviews()
+  if (!step5) { console.error("[SOS TEST] ABORT: Step 5 failed"); return }
 
-  // Wait for results to settle
-  await delay(2_000)
-
-  // Step 4: Read job previews
-  console.log(`\n── Step 4: readAllJobPreviews ──`)
-  const step4 = await testReadJobPreviews()
-  if (!step4) { console.error("[SOS TEST] ABORT: Step 4 failed"); return }
-
-  // Step 5: Read job description for first job
-  console.log(`\n── Step 5: readJobDescription ──`)
-  const firstJob = step4 ? (await readAllJobPreviews(1, undefined))[0] : undefined
+  // Step 6: Read job description for first job
+  console.log(`\n── Step 6: readJobDescription ──`)
+  const firstJob = step5 ? (await readAllJobPreviews(1, undefined))[0] : undefined
   if (!firstJob) { console.error("[SOS TEST] ABORT: No job to test description reading"); return }
-  const step5 = await testReadJobDescription(firstJob)
-  if (!step5) { console.warn("[SOS TEST] Step 5 had issues, continuing...") }
+  const step6 = await testReadJobDescription(firstJob)
+  if (!step6) { console.warn("[SOS TEST] Step 6 had issues, continuing...") }
 
   console.log("\n═══════════════════════════════════════════")
   console.log("[SOS TEST] All tests completed")
@@ -1993,14 +1571,14 @@ export function confirmJobListings(): { found: boolean; count: number; message: 
 /**
  * Run the full LinkedIn pipeline for a single site configuration.
  *
- * Flow (no page reloads — all DOM-based):
+ * Flow (URL-first navigation, filter-bar toggles, modal only for fairChanceEmployer):
  *   1. Login check + anti-bot check
  *   2. Search term shuffling (if enabled)
  *   3. Date/sort cycling (if enabled)
  *   4. For each search term:
- *      a. Navigate to term via DOM input manipulation
- *      b. Apply URL-based filters (try pushState+popstate first, fall back to DOM)
- *      c. Apply DOM-only filters (under 10 applicants, etc.) via "All filters" modal
+ *      a. Navigate via URL with all filter params (buildFilterUrl + keyword)
+ *      b. Apply filter bar toggles (under10Applicants, inYourNetwork)
+ *      c. Apply DOM-only filter (fairChanceEmployer) via "All filters" modal
  *      d. Read all job previews (no scrolling — reads visible cards)
  *      e. Filter by company allow/block list
  *      f. For each job:
@@ -2058,27 +1636,32 @@ export async function runLinkedInPipeline(
     const dateOverride = cycleDate ? DATE_POSTED_VALUES[dateCycleIndex % DATE_POSTED_VALUES.length] : undefined
     const sortOverride = alternateSort ? SORT_VALUES[sortToggle ? 1 : 0] : undefined
 
-    // Step 6a: Navigate to search term via DOM input manipulation
-    // Pass site and termIdx so searchViaGlobalBar can save resume state before page refresh
+    // Step 6a: Navigate to search term via URL with all filter params
+    // URL-based filters (date, sort, experience, job type, on-site, easy apply)
+    // are embedded in the navigation URL via buildFilterUrl.
+    // Pass site, termIdx, and overrides so searchViaUrlNavigation builds the full filter URL.
     onProgress?.(`Navigating to "${term}"...`)
     try {
-      await navigateToSearchTerm(term, signal, site, termIdx)
+      await navigateToSearchTerm(term, signal, site, termIdx, { datePosted: dateOverride, sortBy: sortOverride })
     } catch (err) {
       console.warn(`[SOS] LinkedIn: Failed to navigate to "${term}":`, err)
       continue
     }
 
-    // Step 6b: Apply URL-based filters (try pushState+popstate first, fall back to DOM)
-    onProgress?.(`Applying filters for "${term}"...`)
+    // Step 6b: Apply filter bar toggles (under10Applicants via filter-bar toggle, inYourNetwork via radio toggle)
+    // These are direct filter-bar toggles, NOT the "All Filters" modal.
+    onProgress?.(`Applying filter bar toggles for "${term}"...`)
     try {
-      await applyUrlFiltersViaStateEvents(site, signal, { datePosted: dateOverride, sortBy: sortOverride })
+      const barResult = await applyFilterBarToggles(site, signal)
+      if (!barResult.success) {
+        console.warn("[SOS] LinkedIn: Filter bar toggles had errors:", barResult.errors)
+      }
     } catch (err) {
-      console.warn(`[SOS] LinkedIn: Failed to apply filters for "${term}":`, err)
-      continue
+      console.warn(`[SOS] LinkedIn: Failed to apply filter bar toggles for "${term}":`, err)
     }
 
-    // Step 6c: Apply DOM-based filters (under 10 applicants, in your network, fair chance employer)
-    // Fair chance employer is first tried as a filter-bar toggle; if not found, it falls back to the modal.
+    // Step 6c: Apply DOM-based filter (fairChanceEmployer only — via "All Filters" modal)
+    onProgress?.(`Applying DOM filters for "${term}"...`)
     const domResult = await applyDomFilters(site, site.pipeline.clickDelayMs, signal)
     if (!domResult.success) {
       console.warn("[SOS] LinkedIn: DOM filter application had errors:", domResult.errors)
