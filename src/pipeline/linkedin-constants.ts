@@ -367,3 +367,15 @@ export const FILTER_OPTION_TEXT: Record<string, Record<string, string>> = {
     "hybrid": "Hybrid",
   },
 }
+
+/**
+ * Selector for the "In Your Network" radio toggle in the LinkedIn search results filter bar.
+ * Current LinkedIn design: div[role='radio'] with aria-label directly on it (NOT in the All Filters modal).
+ * Contains a checkbox input and label, uses aria-checked for state.
+ */
+export const IN_YOUR_NETWORK_RADIO_SELECTOR =
+  "div[role='radio'][aria-label='Filter by In my network'], " +
+  /* Fallback variants */
+  "div[role='radio'][aria-label*='In my network'], " +
+  "div[role='radio'][aria-label*='In your network'], " +
+  "div[role='radio'][aria-label*='network']"

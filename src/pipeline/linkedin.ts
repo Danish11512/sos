@@ -63,6 +63,7 @@ import {
   EASY_APPLY_MODAL_SELECTOR,
   DATE_POSTED_VALUES,
   SORT_VALUES,
+  IN_YOUR_NETWORK_RADIO_SELECTOR,
   ALL_FILTERS_BUTTON_SELECTORS,
   SHOW_RESULTS_BUTTON_SELECTORS,
   DESCRIPTION_CONTENT_SELECTOR,
@@ -1090,10 +1091,53 @@ export async function applyUrlFiltersViaStateEvents(
   await applyUrlFiltersViaDom(site, signal, overrides)
 }
 
+/* ── "In Your Network" radio toggle (filter bar, NOT modal) ── */
+
+/**
+ * Toggle the "In Your Network" filter radio in the LinkedIn search results filter bar.
+ * This is a direct radio toggle (NOT in the All Filters modal).
+ *
+ * DOM structure: div[role='radio'][aria-label='Filter by In my network']
+ * Contains a checkbox input and label. Uses aria-checked for state.
+ *
+ * Standalone — works independently of the modal-based applyDomFilters.
+ *
+ * @param enabled - true to turn the filter ON, false to turn it OFF
+ * @param signal  - Optional AbortSignal for cancellation
+ * @returns true if the toggle was interacted with, false if not found or already in correct state
+ */
+export async function toggleInYourNetworkFilter(
+  enabled: boolean,
+  signal?: AbortSignal
+): Promise<boolean> {
+  // Find the radio toggle by selector (uses aria-label matching)
+  const radio = document.querySelector<HTMLElement>(IN_YOUR_NETWORK_RADIO_SELECTOR)
+  if (!radio) {
+    console.warn('[SOS] LinkedIn: Could not find "In Your Network" radio toggle in filter bar')
+    return false
+  }
+
+  // Check current state via aria-checked
+  const isChecked = radio.getAttribute('aria-checked') === 'true'
+
+  if (isChecked === enabled) {
+    console.log(`[SOS] LinkedIn: "In Your Network" already ${enabled ? 'enabled' : 'disabled'} — no action needed`)
+    return false
+  }
+
+  // Click to toggle
+  scrollAndClick(radio)
+  await delay(300, signal)
+  console.log(`[SOS] LinkedIn: Toggled "In Your Network" ${enabled ? 'ON' : 'OFF'}`)
+  return true
+}
+
 /* ── DOM-only filter application (post-nav) ── */
 
 /**
  * Apply DOM-only filters via the "All filters" modal.
+ * "In Your Network" is now handled separately via the filter-bar radio toggle
+ * (see toggleInYourNetworkFilter above), while the rest use the modal.
  * Uses waitForElement (MutationObserver) instead of time-based delays.
  */
 async function applyDomFilters(
@@ -1103,14 +1147,20 @@ async function applyDomFilters(
 ): Promise<ApplyFiltersResult> {
   const result: ApplyFiltersResult = { success: true, appliedCount: 0, errors: [] }
 
+  // "In Your Network" is now a direct radio toggle in the filter bar — handle it separately
+  if (site.filters.inYourNetwork) {
+    const toggled = await toggleInYourNetworkFilter(true, signal)
+    if (toggled) result.appliedCount++
+  }
+
+  // The remaining DOM filters still use the "All filters" modal
   const domFilters = [
     { enabled: site.filters.under10Applicants, label: "Under 10 applicants" },
-    { enabled: site.filters.inYourNetwork, label: "In your network" },
     { enabled: site.filters.fairChanceEmployer, label: "Fair chance employer" },
   ]
 
   if (!domFilters.some((f) => f.enabled)) {
-    console.log("[SOS] LinkedIn: No DOM-only filters to apply")
+    console.log("[SOS] LinkedIn: No remaining DOM-only filters to apply via modal")
     return result
   }
 
@@ -1587,6 +1637,7 @@ export async function testApplyUrlFilters(site: SiteSettings): Promise<boolean> 
 /**
  * Test: applyDomFilters
  * Verifies the "All filters" modal can be opened, checkboxes toggled, and results applied.
+ * "In Your Network" is handled via the filter-bar radio toggle (not in the modal).
  * Usage: call from browser console:
  *   testApplyDomFilters({ filters: { under10Applicants: true, inYourNetwork: true } })
  */
