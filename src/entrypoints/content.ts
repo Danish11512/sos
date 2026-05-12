@@ -17,9 +17,14 @@ import { loadSettings, loadResumeState, clearResumeState } from "../utils/storag
 import { isOnSearchResultsPage, applyPostNavFilters, captureJobs } from "../pipeline/index"
 
 
-import { runLinkedInPipeline } from "../pipeline/linkedin"
+import { runLinkedInPipeline, confirmJobListings } from "../pipeline/linkedin"
 
 import { discardApplication } from "../utils/dom"
+
+// Expose confirmJobListings to the browser console for manual testing
+if (typeof window !== "undefined") {
+  ;(window as unknown as Record<string, unknown>).confirmJobListings = confirmJobListings
+}
 
 
 let widget: FloatingWidget | null = null

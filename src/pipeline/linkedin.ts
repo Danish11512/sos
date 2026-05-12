@@ -82,7 +82,7 @@ import {
   ON_SITE_MAP,
   SORT_MAP,
   FILTER_URL_PARAMS,
-  LINKEDIN_JOBS_SEARCH_URL,
+  LINKEDIN_JOBS_SEARCH_RESULTS_URL,
   NEW_CARD_TITLE_SELECTOR,
   NEW_CARD_COMPANY_SELECTOR,
   NEW_CARD_LOCATION_SELECTOR,
@@ -607,13 +607,15 @@ async function searchViaJobsBar(term: string, signal?: AbortSignal): Promise<boo
 }
 
 /**
- * Strategy 4: Navigate directly to the LinkedIn jobs search URL.
- * This is the most reliable fallback — always works.
+ * Strategy 4: Navigate directly to the LinkedIn jobs search results URL.
+ * This is the most reliable — always works. Tried FIRST per user request:
+ * "let's first route to the link that I gave you. And then we can type in
+ *  the search bar to have the jobs button automatically be clicked."
  */
 async function searchViaUrlNavigation(term: string, signal?: AbortSignal): Promise<void> {
-  console.log("[SOS] LinkedIn: Falling back to URL navigation")
+  console.log("[SOS] LinkedIn: Navigating via search-results URL")
 
-  const url = new URL(LINKEDIN_JOBS_SEARCH_URL)
+  const url = new URL(LINKEDIN_JOBS_SEARCH_RESULTS_URL)
   url.searchParams.set("keywords", term)
   url.searchParams.set("sos_nav", "1")
 
@@ -638,11 +640,18 @@ async function searchViaUrlNavigation(term: string, signal?: AbortSignal): Promi
 }
 
 /**
- * Navigate to a new search term using a multi-strategy approach:
- *   1. Try LinkedIn's global search bar (top nav, works from ANY page)
- *   2. Try LinkedIn's semantic search bar (AI-powered, on jobs pages)
- *   3. Try LinkedIn's jobs-specific search bar (on /jobs/ pages)
- *   4. Fall back to URL navigation (most reliable)
+ * Navigate to a new search term.
+ *
+ * Strategy (URL-first, per user request):
+ *   1. Navigate directly to the search-results URL with the keyword
+ *   2. If already on a jobs search results page, update keyword param via pushState
+ *   3. Try the jobs-specific search bar (on /jobs/ pages) for refinement
+ *   4. Try LinkedIn's semantic search bar (AI-powered, on jobs pages)
+ *   5. Fall back to global search bar (top nav)
+ *
+ * "One change. Instead of typing in the search bar in the beginning, let's
+ *  first route to the link that I gave you. And then we can type in the
+ *  search bar to have the jobs button automatically be clicked."
  *
  * Uses waitForCondition to confirm the input value was set before dispatching Enter.
  * Uses waitForResults to wait for cards or empty state after search.
@@ -658,12 +667,11 @@ export async function navigateToSearchTerm(
 ): Promise<void> {
   console.log(`[SOS] LinkedIn: Navigating to search term "${term}"`)
 
-  // Guard: If already on a LinkedIn jobs search results page, skip the global bar
-  // approach entirely to avoid a FULL PAGE REFRESH loop. Clicking the "Jobs" radio
-  // button in the global bar typeahead triggers a page reload, which re-runs the
-  // pipeline, which calls navigateToSearchTerm again → infinite loop.
+  // Guard: If already on a LinkedIn jobs search results page (any /jobs/search* URL),
+  // update keyword param via pushState instead of navigating again.
   const currentUrl = window.location.href.toLowerCase()
   const onJobsSearchResults = currentUrl.includes("/jobs/search/") ||
+    currentUrl.includes("/jobs/search-results/") ||
     (currentUrl.includes("/jobs/") && currentUrl.includes("keywords="))
 
   if (onJobsSearchResults) {
@@ -679,20 +687,31 @@ export async function navigateToSearchTerm(
     }
   }
 
-  // Strategy 1: Global search bar (works from ANY LinkedIn page)
-  const globalResult = await searchViaGlobalBar(term, signal, site, termIdx)
-  if (globalResult) return
+  // Strategy 1 (NEW PRIMARY): Navigate directly to the search-results URL first
+  // This avoids the fragile global search bar typeahead and full page refreshes.
+  try {
+    await searchViaUrlNavigation(term, signal)
+    return
+  } catch (err) {
+    // If searchViaUrlNavigation threw, it means it triggered a full page reload.
+    // The pipeline will resume via the resume-state mechanism.
+    if (err instanceof Error && err.message.includes("page will reload")) {
+      throw err // Re-throw so runLinkedInPipeline handles resume correctly
+    }
+    console.warn("[SOS] LinkedIn: URL navigation failed — trying search bar fallbacks", err)
+  }
 
-  // Strategy 2: Semantic search bar (AI-powered, on jobs pages)
-  const semanticResult = await searchViaSemanticBar(term, signal)
-  if (semanticResult) return
-
-  // Strategy 3: Jobs-specific search bar (on /jobs/ pages)
+  // Strategy 2: Jobs-specific search bar (on /jobs/ pages)
   const jobsResult = await searchViaJobsBar(term, signal)
   if (jobsResult) return
 
-  // Strategy 4: URL navigation (always works)
-  await searchViaUrlNavigation(term, signal)
+  // Strategy 3: Semantic search bar (AI-powered, on jobs pages)
+  const semanticResult = await searchViaSemanticBar(term, signal)
+  if (semanticResult) return
+
+  // Strategy 4: Global search bar (works from ANY LinkedIn page — last resort)
+  const globalResult = await searchViaGlobalBar(term, signal, site, termIdx)
+  if (globalResult) return
 }
 
 /* ── Navigation: Filters (DOM-based dropdown interaction) ── */
@@ -1499,12 +1518,6 @@ export async function readJobDescription(
 
 /* ── Test functions for each pipeline step ── */
 
-/**
- * Test: navigateToSearchTerm
- * Verifies the search input can be found, cleared, and a term entered + Enter dispatched.
- * Does NOT wait for results (just tests the input manipulation).
- * Usage: call from browser console: testNavigateToSearchTerm("software engineer")
- */
 export async function testNavigateToSearchTerm(term: string): Promise<boolean> {
   console.log(`[SOS TEST] Testing navigateToSearchTerm("${term}")...`)
   try {
@@ -1724,6 +1737,28 @@ export async function testAllSteps(site: SiteSettings): Promise<void> {
   console.log("\n═══════════════════════════════════════════")
   console.log("[SOS TEST] All tests completed")
   console.log("═══════════════════════════════════════════")
+}
+
+/* ── Job listing confirmation ── */
+
+/**
+ * Confirm that job listings are visible on the current search results page.
+ * Checks DOM for elements matching CARD_SELECTOR.
+ * Usage: call from browser console: confirmJobListings()
+ *
+ * @returns { found: boolean; count: number; message: string }
+ */
+export function confirmJobListings(): { found: boolean; count: number; message: string } {
+  const cards = document.querySelectorAll(CARD_SELECTOR)
+  const count = cards.length
+  if (count > 0) {
+    return { found: true, count, message: `Found ${count} job listing(s) on the page` }
+  }
+  const empty = document.querySelector(EMPTY_STATE_SELECTOR)
+  if (empty) {
+    return { found: false, count: 0, message: "No job listings found — empty state detected" }
+  }
+  return { found: false, count: 0, message: "No job listings found — could not detect job cards or empty state" }
 }
 
 /* ── Pipeline orchestrator ── */

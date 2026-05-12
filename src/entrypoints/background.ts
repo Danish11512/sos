@@ -18,7 +18,7 @@ export default defineBackground(() => {
     const urlLower = url.toLowerCase()
     const isSearchPage =
       matched.id === "linkedin"
-        ? urlLower.includes("/jobs/search/")
+        ? urlLower.includes("/jobs/search/") || urlLower.includes("/jobs/search-results/")
         : matched.id === "indeed"
           ? urlLower.includes("/jobs") && urlObj.searchParams.has("q")
           : false

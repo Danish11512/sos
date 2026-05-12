@@ -168,7 +168,7 @@ export function isOnSearchResultsPage(siteId: string): boolean {
   const url = window.location.href.toLowerCase()
   switch (siteId) {
     case "linkedin":
-      return url.includes("/jobs/search/")
+      return url.includes("/jobs/search/") || url.includes("/jobs/search-results/")
     case "indeed":
       return url.includes("/jobs") && url.includes("?q=")
     default:

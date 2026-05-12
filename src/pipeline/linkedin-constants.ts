@@ -107,11 +107,15 @@ export const EASY_APPLY_CLOSE_SELECTOR =
   "button.jobs-easy-apply-modal__close-btn, " +
   ".artdeco-modal__dismiss"
 
-/** LinkedIn jobs search page base URL (current LinkedIn SPA path). */
+/** LinkedIn jobs search page base URL (legacy SPA path). */
 export const LINKEDIN_JOBS_SEARCH_URL = "https://www.linkedin.com/jobs/search/"
 
-/** URL path fragment that identifies a search results page. */
-export const SEARCH_PAGE_PATH = "/jobs/search/"
+/** LinkedIn jobs search-results page URL (current SPA path, May 2026). */
+export const LINKEDIN_JOBS_SEARCH_RESULTS_URL = "https://www.linkedin.com/jobs/search-results/"
+
+/** URL path fragment that identifies a search results page. Both old and current formats. */
+export const SEARCH_PAGE_PATH = "/jobs/search/" // legacy
+export const SEARCH_RESULTS_PAGE_PATH = "/jobs/search-results/" // current
 
 /* ── URL param maps ── */
 
