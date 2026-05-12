@@ -255,9 +255,10 @@ src/
 | **1** | Site preset + URL detection | Add WF to sites.ts, background detection, content script URL match. **Override:** `skipSettingsValidation=true` so the Start button is immediately clickable without any settings | Widget appears on `wellfound.com/jobs` with a ready-to-click Start button |
 | **2** | Read job listings | Parse cards, extract title/company/salary, console log everything | `[SOS] [Wellfound] Found 12 jobs` |
 | **3** | Click + details | Click job → "Learn more" → verify detail panel | Can navigate through jobs |
-| **4** | Apply flow | Detect Apply button → click → fill modal → submit | First working application |
-| **5** | Pause-for-input | Detect mandatory fields → pause → wait for user → resume | User fills missing fields |
-| **6** | Polish | Error handling, external apply detection, done/error states | Shipped |
+| **4** | **External vs Native check** | **Detect "Apply on Wellfound" badge on job card. If absent → skip (external, disregard). If present → proceed to apply. Console log each decision: `[SOS] [Wellfound] [i/N] Skipped (external)` or `[SOS] [Wellfound] [i/N] ✓ Apply on Wellfound (native)`.** | Pipeline correctly classifies and skips external jobs; only applies to native ones |
+| **5** | Apply flow | Detect Apply button → click native-only → fill modal → submit | First working application (native jobs only) |
+| **6** | Pause-for-input | Detect mandatory fields → pause → wait for user → resume | User fills missing fields |
+| **7** | Polish | Error handling, done/error states, edge cases | Shipped |
 
 ---
 
