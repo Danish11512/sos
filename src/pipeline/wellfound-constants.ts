@@ -110,6 +110,15 @@ export const MOBILE_APPLY_BUTTON_SELECTOR =
 
 /* ── Detail panel & form selectors ── */
 
+/** Selector for close/dismiss buttons inside the detail panel modal.
+ *  Used to close an already-open modal before opening a new job's details. */
+export const MODAL_CLOSE_BUTTON_SELECTOR =
+  `button[aria-label*="Close"], ` +
+  `button[aria-label*="Dismiss"], ` +
+  `button[aria-label*="Back"], ` +
+  `button[class*="close"], ` +
+  `button[class*="dismiss"]`
+
 /** Selector for the detail/apply panel container (slide-in modal on the same page).
  *  Observed test attribute: `div[data-test="DiscoverModal"]`.
  *  Left 3/5 = job details, right 2/5 = application form. */

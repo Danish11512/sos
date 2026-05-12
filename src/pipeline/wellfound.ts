@@ -13,7 +13,18 @@
  */
 
 import type { JobPreview } from "./types"
-import { STARTUP_RESULT_SELECTOR } from "./wellfound-constants"
+import {
+  dispatchEscapeKey,
+  randomDelay,
+  waitForCondition,
+  waitForElement,
+} from "../utils/dom"
+import {
+  DETAIL_PANEL_SELECTOR,
+  LEARN_MORE_BUTTON_SELECTOR,
+  MODAL_CLOSE_BUTTON_SELECTOR,
+  STARTUP_RESULT_SELECTOR,
+} from "./wellfound-constants"
 
 /* ── Pipeline ── */
 
@@ -57,6 +68,101 @@ export async function runWellfoundPipeline(
   signal.throwIfAborted()
   console.log("[SOS] [Wellfound] ✅ Pipeline complete (Phase 2 — Phase 3 will add clicking/navigation)")
   onProgress?.("Pipeline complete")
+}
+
+
+/* ── Job detail opener ── */
+
+/**
+ * Open the job detail modal (slide-in panel) for a given job preview.
+ *
+ * 1. Checks for and closes any already-open modal (from a previous job)
+ * 2. Scrolls the job card into view
+ * 3. Clicks the "Learn more" button within the job card
+ * 4. Waits for `div[data-test="DiscoverModal"]` to appear in the DOM
+ * 5. Returns the modal element
+ *
+ * Each step is logged with a `[SOS] [Wellfound]` prefix.
+ *
+ * @param job    - The job preview whose details to open
+ * @param signal - Optional AbortSignal for cancellation
+ * @returns The modal element, or `null` if the modal could not be opened
+ */
+export async function openWellfoundJobDetails(
+  job: JobPreview,
+  signal?: AbortSignal,
+): Promise<Element | null> {
+  signal?.throwIfAborted()
+  console.log(
+    `[SOS] [Wellfound] Opening job details for "${job.title}" @ "${job.company}"`,
+  )
+
+  /* ── Handle already-open modal ── */
+  const existingModal = document.querySelector(DETAIL_PANEL_SELECTOR)
+  if (existingModal) {
+    console.log("[SOS] [Wellfound] Existing modal detected — closing it first")
+    // Try to find a close/dismiss button inside the modal
+    const closeBtn = existingModal.querySelector<HTMLElement>(
+      MODAL_CLOSE_BUTTON_SELECTOR,
+    )
+    if (closeBtn) {
+      closeBtn.click()
+    } else {
+      // Fallback: dispatch Escape key to dismiss the modal
+      dispatchEscapeKey()
+    }
+    // Wait for the modal to be removed from the DOM
+    try {
+      await waitForCondition(
+        () => !document.querySelector(DETAIL_PANEL_SELECTOR),
+        { timeoutMs: 5_000, signal },
+      )
+    } catch {
+      console.warn(
+        "[SOS] [Wellfound] Timed out waiting for existing modal to close — proceeding anyway",
+      )
+    }
+    console.log("[SOS] [Wellfound] Existing modal closed")
+  }
+
+  /* ── Step 1: Scroll the job card into view ── */
+  signal?.throwIfAborted()
+  console.log(`[SOS] [Wellfound] Scrolling job card into view`)
+  if (job.element instanceof HTMLElement) {
+    job.element.scrollIntoView({ behavior: "smooth", block: "center" })
+  }
+  // Brief human-like pause after scrolling
+  await randomDelay(300, 900, signal)
+
+  /* ── Step 2: Find and click the "Learn more" button ── */
+  signal?.throwIfAborted()
+  console.log(`[SOS] [Wellfound] Clicking "Learn more" button`)
+  const learnMoreBtn = job.element.querySelector<HTMLElement>(
+    LEARN_MORE_BUTTON_SELECTOR,
+  )
+  if (!learnMoreBtn) {
+    console.error(
+      `[SOS] [Wellfound] "Learn more" button not found for "${job.title}" @ "${job.company}"`,
+    )
+    return null
+  }
+  learnMoreBtn.click()
+
+  /* ── Step 3: Wait for the detail modal to appear ── */
+  signal?.throwIfAborted()
+  console.log(`[SOS] [Wellfound] Waiting for detail modal to appear`)
+  const modal = await waitForElement<Element>(DETAIL_PANEL_SELECTOR, 8_000, signal)
+  if (!modal) {
+    console.error(
+      `[SOS] [Wellfound] Detail modal did not appear for "${job.title}" @ "${job.company}"`,
+    )
+    return null
+  }
+
+  console.log(
+    `[SOS] [Wellfound] Detail modal opened successfully for "${job.title}" @ "${job.company}"`,
+  )
+  return modal
 }
 
 
