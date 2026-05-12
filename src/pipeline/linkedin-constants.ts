@@ -5,12 +5,15 @@
 
 /* ── DOM Selectors ── */
 
-/** Selector for the LinkedIn global search bar (top nav, present on ALL pages). */
+/** Selector for the LinkedIn global search bar (top nav, present on ALL pages).
+ *  Strategy: scope the search input by structural container and placeholder text,
+ *  avoiding broad attribute selectors or hashed CSS-module class names.
+ *  - `nav`/`header` structural containers keep the selector page-scoped
+ *  - `placeholder` is a stable text signal that doesn't change with CSS-module hashing */
 export const GLOBAL_SEARCH_SELECTOR =
-  "input.search-global-typeahead__input, " +
-  "input[aria-label*='Search'], " +
-  "#global-nav-search input, " +
-  "input[role='combobox']"
+  "nav input[placeholder*='Search'], " +
+  "header input[placeholder*='Search'], " +
+  "#global-nav-search input"
 
 /** Selector for LinkedIn's new semantic job search input (on jobs pages). */
 export const SEMANTIC_SEARCH_SELECTOR =
