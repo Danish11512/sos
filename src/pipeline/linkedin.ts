@@ -337,8 +337,24 @@ async function searchViaGlobalBar(
   // Clear and type the term
   typeIntoInput(input, term)
 
-  // Wait for the typeahead dropdown to appear with the "Jobs" filter option
-  await delay(800, signal)
+  // Wait for the typeahead dropdown to appear — uses MutationObserver-based
+  // waitForCondition instead of a fixed delay to handle variable network latency
+  // and rendering time. Times out after 5s and falls through to other strategies.
+  try {
+    await waitForCondition(
+      () =>
+        document.querySelector(
+          "[data-test-typeahead], " +
+          ".search-global-typeahead__typeahead, " +
+          "div[role='listbox']"
+        ) !== null,
+      { timeoutMs: 5_000, signal, pollIntervalMs: 100 }
+    )
+    console.log("[SOS] LinkedIn: Typeahead dropdown appeared")
+  } catch {
+    console.log("[SOS] LinkedIn: Typeahead dropdown did not appear within timeout")
+    return false
+  }
 
   // Find and click the "Jobs" filter button in the typeahead dropdown
   // This navigates to the jobs search results page with the keywords
