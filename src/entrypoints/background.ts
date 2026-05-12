@@ -21,7 +21,9 @@ export default defineBackground(() => {
         ? urlLower.includes("/jobs/search/") || urlLower.includes("/jobs/search-results/")
         : matched.id === "indeed"
           ? urlLower.includes("/jobs") && urlObj.searchParams.has("q")
-          : false
+          : matched.id === "wellfound"
+            ? urlLower.includes("/jobs")
+            : false
 
     if (!isSearchPage) return
 

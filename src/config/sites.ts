@@ -11,4 +11,9 @@ export const sitePresets: SitePreset[] = [
     name: "Indeed",
     urlPattern: "indeed.com",
   },
+  {
+    id: "wellfound",
+    name: "Wellfound",
+    urlPattern: "wellfound.com",
+  },
 ]

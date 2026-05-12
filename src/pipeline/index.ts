@@ -171,6 +171,8 @@ export function isOnSearchResultsPage(siteId: string): boolean {
       return url.includes("/jobs/search/") || url.includes("/jobs/search-results/")
     case "indeed":
       return url.includes("/jobs") && url.includes("?q=")
+    case "wellfound":
+      return url.includes("/jobs")
     default:
       return false
   }

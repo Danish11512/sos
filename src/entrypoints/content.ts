@@ -328,7 +328,7 @@ function handleUrlChange(): void {
 /* ── Entry ── */
 
 export default defineContentScript({
-  matches: ["*://*.linkedin.com/*", "*://*.indeed.com/*"],
+  matches: ["*://*.linkedin.com/*", "*://*.indeed.com/*", "*://*.wellfound.com/*"],
   main() {
     // Legacy pipeline resume (Indeed)
     if (new URLSearchParams(window.location.search).has("sos_running")) {
