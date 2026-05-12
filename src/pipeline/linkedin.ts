@@ -1035,8 +1035,10 @@ function buildFilterUrl(
     }
   }
 
-  // Easy Apply (f_AL) — always enabled (mandatory)
-  url.searchParams.set("f_AL", "true")
+  // Easy Apply (f_AL) — controlled by UI toggle
+  if (site.filters.easyApplyOnly) {
+    url.searchParams.set("f_AL", "true")
+  }
 
   return url
 }

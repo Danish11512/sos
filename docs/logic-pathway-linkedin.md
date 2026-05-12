@@ -236,7 +236,7 @@ runLinkedInPipeline(site, signal, onProgress)
 | `navigateToSearchPage()` | Widget `onNavigate` callback | `pushStateNavigate()`, `window.location.href` | Navigates to LinkedIn jobs search page. Tries pushState first, falls back to full redirect. Skips if already on search page. |
 | `navigateToSearchTerm(term, signal)` | `runLinkedInPipeline()` | `waitForElement()`, `setReactInputValue()`, `waitForCondition()`, `dispatchEnterKey()`, `waitForResults()` | DOM-based search term entry. Finds search input → focus → clear → set new value → dispatch Enter → wait for results. Falls back to text-based input detection if primary selectors fail. |
 | `applyFiltersViaPushState(site, signal, overrides, currentSearchTerm)` | `runLinkedInPipeline()` | `buildFilterUrl()`, `pushStateNavigate()`, `waitForResults()` | Applies URL-based filters via history.pushState + PopStateEvent. Builds filter URL from settings, navigates via pushState, waits for results. |
-| `buildFilterUrl(site, overrides, explicitKeywords)` | `applyFiltersViaPushState()` | — | Builds LinkedIn search URL with all filter params. Preserves keywords/location/geoId from current URL. Always sets `f_AL=true` (Easy Apply). Maps sort, date, experience, job type, on-site settings to URL params. |
+| `buildFilterUrl(site, overrides, explicitKeywords)` | `applyFiltersViaPushState()` | — | Builds LinkedIn search URL with all filter params. Preserves keywords/location/geoId from current URL. Sets `f_AL=true` (Easy Apply) only if `site.filters.easyApplyOnly` is enabled. Maps sort, date, experience, job type, on-site settings to URL params. |
 | `applyDomFilters(site, clickDelayMs, signal)` | `runLinkedInPipeline()` | `waitForElement()`, `scrollAndClick()`, `toggleCheckboxItems()`, `findButtonByText()`, `waitForResults()` | Opens "All filters" modal, toggles DOM-only filters (under 10 applicants, in your network, fair chance employer), clicks "Show results". Uses MutationObserver-based waits. |
 
 ### 3.3 Job Reading Functions
@@ -612,7 +612,7 @@ runLinkedInPipeline(site, signal, onProgress)
 │   │     → Map experienceLevel → f_E
 │   │     → Map jobType → f_JT
 │   │     → Map onSite → f_WT
-│   │     → Always set f_AL=true (Easy Apply)
+│   │     → Set f_AL=true (Easy Apply) only if site.filters.easyApplyOnly is enabled
 │   │   → pushStateNavigate(url) → history.pushState + PopStateEvent
 │   │   → waitForResults()
 │   │

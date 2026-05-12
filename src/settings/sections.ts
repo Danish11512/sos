@@ -78,7 +78,7 @@ export class SearchSection extends SettingsSection<SearchSettings> {
 export interface FilterSettings {
   sortBy: string; datePosted: string; salary: string
   experienceLevel: string[]; jobType: string[]; onSite: string[]
-  under10Applicants: boolean; inYourNetwork: boolean; fairChanceEmployer: boolean
+  easyApplyOnly: boolean; under10Applicants: boolean; inYourNetwork: boolean; fairChanceEmployer: boolean
   companies: string[]
   aboutCompanyBadWords: string[]; aboutCompanyGoodWords: string[]; badWords: string[]
   securityClearance: boolean; didMasters: boolean; currentExperience: number
@@ -87,7 +87,7 @@ export interface FilterSettings {
 export const DEFAULT_FILTERS: FilterSettings = {
   sortBy: "", datePosted: "", salary: "",
   experienceLevel: [], jobType: [], onSite: [],
-  under10Applicants: false, inYourNetwork: false, fairChanceEmployer: false,
+  easyApplyOnly: false, under10Applicants: false, inYourNetwork: false, fairChanceEmployer: false,
   companies: [],
   aboutCompanyBadWords: [], aboutCompanyGoodWords: [], badWords: [],
   securityClearance: false, didMasters: false, currentExperience: -1,
