@@ -257,6 +257,16 @@ export const SEARCH_RESULTS_FILTER_BAR =
   "a[role='radio'][aria-label*='Filter by'], " +
   "a[role='radio']"
 
+/**
+ * Selector for the "Under 10 applicants" radio toggle in the LinkedIn filter bar.
+ * This is a div with role="radio" and aria-label="Filter by Under 10 applicants",
+ * NOT inside the "All Filters" modal. It contains a checkbox input and label.
+ */
+export const UNDER_10_APPLICANTS_SELECTOR =
+  "div[role='radio'][aria-label*='Filter by Under 10 applicants'], " +
+  "div[role='radio'][aria-label*='Under 10 applicants'], " +
+  "div[role='radio']:has(div[aria-label*='Under 10 applicants'])"
+
 /* ── Filter dropdown button selectors (top of search results) ── */
 
 /** Filter dropdown button: Date Posted.

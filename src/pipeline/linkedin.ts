@@ -90,6 +90,7 @@ import {
   NEW_LIST_COLUMN_SELECTOR,
   NEW_DETAIL_COLUMN_SELECTOR,
   SEARCH_RESULTS_FILTER_BAR,
+  UNDER_10_APPLICANTS_SELECTOR,
 } from "./linkedin-constants"
 
 import { fillEasyApplyModal, clickEasyApplyButton, closeEasyApplyModal } from "./easy-apply-modal"
@@ -1134,12 +1135,86 @@ export async function toggleInYourNetworkFilter(
   return true
 }
 
+/* ── "Under 10 applicants" radio toggle (filter bar, NOT modal) ── */
+
+/**
+ * Toggle the "Under 10 applicants" radio toggle directly in the LinkedIn filter bar.
+ * This filter is now a radio toggle in the filter bar (NOT in the "All Filters" modal).
+ *
+ * DOM structure: div[role='radio'][aria-label*='Filter by Under 10 applicants']
+ * containing a checkbox input and label.
+ *
+ * Finds the toggle, checks if already selected (via aria-checked, inner checkbox checked,
+ * or active CSS class), and clicks it if not already selected.
+ *
+ * Standalone — exported for direct console testing:
+ *   toggleUnder10ApplicantsFilter(true)
+ *
+ * @param enabled - Whether the filter should be active
+ * @param signal  - Optional AbortSignal
+ * @returns true if the filter was toggled (or already active), false on failure
+ */
+export async function toggleUnder10ApplicantsFilter(
+  enabled: boolean,
+  signal?: AbortSignal
+): Promise<boolean> {
+  if (!enabled) {
+    console.log("[SOS] LinkedIn: Under 10 applicants filter not enabled — skipping")
+    return true
+  }
+
+  console.log("[SOS] LinkedIn: Looking for Under 10 applicants radio toggle in filter bar...")
+
+  // Wait for the radio toggle element to appear in the DOM
+  const radioToggle = await waitForElement<HTMLElement>(
+    UNDER_10_APPLICANTS_SELECTOR,
+    6_000,
+    signal
+  )
+
+  if (!radioToggle) {
+    console.warn("[SOS] LinkedIn: Could not find Under 10 applicants radio toggle in filter bar")
+    return false
+  }
+
+  // Check if already selected via multiple indicators
+  const isChecked = radioToggle.getAttribute("aria-checked") === "true"
+  const innerCheckbox = radioToggle.querySelector<HTMLInputElement>(
+    "input[type='checkbox']"
+  )
+  const isCheckboxChecked = innerCheckbox?.checked === true
+  const hasActiveClass = radioToggle.classList.contains(
+    "jobs-search-results-list__filter-button--active"
+  )
+
+  if (isChecked || isCheckboxChecked || hasActiveClass) {
+    console.log("[SOS] LinkedIn: Under 10 applicants filter already active")
+    return true
+  }
+
+  // Not selected — click the toggle
+  console.log("[SOS] LinkedIn: Clicking Under 10 applicants radio toggle...")
+  scrollAndClick(radioToggle)
+
+  // Wait a brief moment for the filter to take effect
+  try {
+    await delay(500, signal)
+  } catch {
+    // Aborted
+    return false
+  }
+
+  console.log("[SOS] LinkedIn: Under 10 applicants filter toggled ON")
+  return true
+}
+
 /* ── DOM-only filter application (post-nav) ── */
 
 /**
  * Apply DOM-only filters via the "All filters" modal.
- * "In Your Network" is now handled separately via the filter-bar radio toggle
- * (see toggleInYourNetworkFilter above), while the rest use the modal.
+ * "In Your Network" and "Under 10 applicants" are now handled separately via
+ * the filter-bar radio toggles (see toggleInYourNetworkFilter and
+ * toggleUnder10ApplicantsFilter above), while the rest use the modal.
  * Uses waitForElement (MutationObserver) instead of time-based delays.
  */
 async function applyDomFilters(
@@ -1155,14 +1230,22 @@ async function applyDomFilters(
     if (toggled) result.appliedCount++
   }
 
-  // The remaining DOM filters still use the "All filters" modal
+  // "Under 10 applicants" is now a direct radio toggle in the filter bar — handle it separately
+  const under10Result = await toggleUnder10ApplicantsFilter(
+    site.filters.under10Applicants,
+    signal
+  )
+  if (!under10Result) {
+    result.errors.push("Failed to toggle Under 10 applicants filter in filter bar")
+  }
+
+  // Only Fair chance employer still uses the "All filters" modal
   const domFilters = [
-    { enabled: site.filters.under10Applicants, label: "Under 10 applicants" },
     { enabled: site.filters.fairChanceEmployer, label: "Fair chance employer" },
   ]
 
   if (!domFilters.some((f) => f.enabled)) {
-    console.log("[SOS] LinkedIn: No remaining DOM-only filters to apply via modal")
+    console.log("[SOS] LinkedIn: No DOM-only filters to apply via modal (all handled via filter bar toggles)")
     return result
   }
 
