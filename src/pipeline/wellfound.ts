@@ -32,7 +32,21 @@ import {
   LEARN_MORE_BUTTON_SELECTOR,
   MODAL_CLOSE_BUTTON_SELECTOR,
   STARTUP_RESULT_SELECTOR,
+  USER_AVATAR_SELECTOR,
 } from "./wellfound-constants"
+
+/* ── Login check ── */
+
+/**
+ * Check whether the user is logged into Wellfound by looking for a
+ * user avatar / profile element in the DOM.
+ *
+ * @returns `true` if the user avatar/profile element is found, `false` otherwise.
+ */
+export function isWellfoundLoggedIn(): boolean {
+  return !!document.querySelector(USER_AVATAR_SELECTOR)
+}
+
 
 /* ── Pipeline ── */
 
@@ -58,6 +72,16 @@ export async function runWellfoundPipeline(
   signal: AbortSignal,
   onProgress?: (msg: string) => void,
 ): Promise<void> {
+  /* ── Login check ── */
+  if (!isWellfoundLoggedIn()) {
+    console.log("[SOS] [Wellfound] Login check FAILED")
+    throw new Error(
+      "[SOS] [Wellfound] Not logged into Wellfound — aborting pipeline. " +
+      "Please log in at https://wellfound.com and try again.",
+    )
+  }
+  console.log("[SOS] [Wellfound] Login check: OK")
+
   console.log("[SOS] [Wellfound] Starting Wellfound pipeline...")
   onProgress?.("Starting pipeline…")
 
