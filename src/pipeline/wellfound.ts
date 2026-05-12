@@ -341,13 +341,15 @@ export async function openWellfoundJobDetails(
 /* ── Detail panel close (WF-7) ── */
 
 /**
- * Close the Wellfound detail panel (slide-in DiscoverModal) by trying up to 3 strategies.
+ * Close the Wellfound detail panel (slide-in DiscoverModal) by trying up to 5 strategies.
  *
  * Strategies (in order):
  *   1) Click the backdrop/overlay outside the panel (the DiscoverModal is relative
  *      positioned, so there is typically an overlay sibling/parent that receives clicks)
  *   2) Dispatch an Escape key event on the document
  *   3) Click a close/dismiss button if present inside the panel
+ *   4) Click the modal container itself to trigger backdrop click handlers
+ *   5) Nuclear option — directly remove the modal from the DOM
  *
  * After each strategy attempt, waits for the modal to be removed from the DOM
  * using `waitForCondition`. Returns `true` as soon as one strategy succeeds.
@@ -434,6 +436,33 @@ export async function closeWellfoundDetailPanel(
     }
   } else {
     console.log("[SOS] [Wellfound] No close/dismiss button found in detail panel (strategy 3)")
+  }
+
+  /* ── Strategy 4: Click the modal container itself ── */
+  // Many React modals detect backdrop clicks via `e.target === e.currentTarget`
+  // on the container element. Clicking `.click()` on the container will set
+  // both target and currentTarget to the same element, triggering the handler.
+  console.log("[SOS] [Wellfound] Clicking modal container to trigger backdrop handler (strategy 4)")
+  await scrollAndClick(detailPanel, signal)
+  if (await waitForClose()) {
+    console.log("[SOS] [Wellfound] Detail panel closed via modal container click")
+    const onListingPage = !!document.querySelector(STARTUP_RESULT_SELECTOR)
+    if (onListingPage) {
+      console.log("[SOS] [Wellfound] Confirmed back on jobs listing page")
+      await delay(500, signal)
+      return true
+    }
+  }
+
+  /* ── Strategy 5: Nuclear option — remove modal from DOM ── */
+  console.log("[SOS] [Wellfound] Removing modal from DOM directly (strategy 5 — nuclear)")
+  detailPanel.remove()
+  if (await waitForClose(1_000)) {
+    console.log("[SOS] [Wellfound] Detail panel removed from DOM")
+    await delay(500, signal)
+    return true
+  } else {
+    console.error("[SOS] [Wellfound] Failed to remove detail panel from DOM")
   }
 
   /* ── All strategies exhausted ── */
@@ -618,19 +647,45 @@ export async function submitWellfoundApplication(
   signal?.throwIfAborted()
   console.log("[SOS] [Wellfound] Submitting application...")
 
-  /* ── Step 1: Find the submit button ── */
-  let submitBtn = detailPanel.querySelector<HTMLElement>(
+  /* ── Step 1: Find the submit button (scoped to right-side form section) ── */
+  const formSection = detailPanel.querySelector<HTMLElement>(APPLY_FORM_SELECTOR)
+  let submitBtn: HTMLElement | null = null
+
+  if (formSection) {
+    console.log("[SOS] [Wellfound] Searching for submit button in right-side form section")
     // Primary: data-test attribute from observed DOM
-    // (DETAIL_APPLY_BUTTON_SELECTOR also covers this but includes Playwright-only
-    // pseudo-classes, so we query the specific selectors directly)
-    'button[data-test="JobDescriptionSlideIn--SubmitButton"]',
-  )
+    submitBtn = formSection.querySelector<HTMLElement>(
+      'button[data-test="JobDescriptionSlideIn--SubmitButton"]',
+    )
+    if (!submitBtn) {
+      // Fallback: type="submit" button
+      submitBtn = formSection.querySelector<HTMLElement>('button[type="submit"]')
+    }
+    if (!submitBtn) {
+      // Fallback: text-based match
+      submitBtn = findButtonByText(formSection, "apply", "submit", "send") as HTMLElement | null
+    }
+    if (!submitBtn) {
+      // Fallback: button with data-test="Button" and text "Apply"
+      // (the Apply button in the form uses data-test="Button", not the SubmitButton selector)
+      const btn = formSection.querySelector<HTMLElement>('button[data-test="Button"]')
+      if (btn && btn.textContent?.trim().toLowerCase().includes("apply")) {
+        submitBtn = btn
+      }
+    }
+  }
+
+  // Fallback: search the entire modal if form section not found
   if (!submitBtn) {
-    // Fallback: type="submit" button
+    console.log("[SOS] [Wellfound] Form section not found — searching entire modal for submit button")
+    submitBtn = detailPanel.querySelector<HTMLElement>(
+      'button[data-test="JobDescriptionSlideIn--SubmitButton"]',
+    )
+  }
+  if (!submitBtn) {
     submitBtn = detailPanel.querySelector<HTMLElement>('button[type="submit"]')
   }
   if (!submitBtn) {
-    // Fallback: text-based match
     submitBtn = findButtonByText(detailPanel, "apply", "submit", "send") as HTMLElement | null
   }
   if (!submitBtn) {

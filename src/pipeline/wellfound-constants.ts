@@ -89,13 +89,17 @@ export const LEARN_MORE_BUTTON_SELECTOR =
   `button[class*="learn-more"]`
 
 /** Selector for the "Apply" button inside the detail panel.
- *  Observed test attribute: `button[data-test="JobDescriptionSlideIn--SubmitButton"]`. */
+ *  Observed test attribute: `button[data-test="JobDescriptionSlideIn--SubmitButton"]`
+ *  on the form submit button, or `button[data-test="Button"]` with text "Apply"
+ *  on the right-side form and mobile footer. */
 export const DETAIL_APPLY_BUTTON_SELECTOR =
   /* Primary: data-test attribute from observed DOM */
   `button[data-test="JobDescriptionSlideIn--SubmitButton"], ` +
   /* Fallback: apply button within the detail panel modal */
   `div[data-test="DiscoverModal"] button[type="submit"], ` +
   `div[data-test="DiscoverModal"] button:has-text("Apply"), ` +
+  /* Fallback: button with data-test="Button" and text "Apply" */
+  `button[data-test="Button"]:has-text("Apply"), ` +
   /* Broad fallback */
   `button[class*="SubmitButton"]`
 
@@ -129,20 +133,24 @@ export const DETAIL_PANEL_SELECTOR =
   `div[role="dialog"][class*="slide"], ` +
   `div[class*="modal"]:has(button[data-test="JobDescriptionSlideIn--SubmitButton"])`
 
-/** Selector for the job detail content side (left 3/5) of the detail panel. */
+/** Selector for the job detail content side (left 3/5) of the detail panel.
+ *  Observed class: `flex w-full flex-col lg:w-3/5`. */
 export const DETAIL_CONTENT_SELECTOR =
-  /* Primary: left side of split panel */
-  `div[data-test="DiscoverModal"] > div:first-child, ` +
-  `div[data-test="DiscoverModal"] div:not([class*="w-2/5"]):not([class*="lg:w-2/5"])`
+  /* Primary: left side with w-3/5 class */
+  `div[class*="w-3/5"], ` +
+  /* Fallback: first child inside gap-12 flex container */
+  `div[data-test="DiscoverModal"] [class*="gap-12"] > div:first-child`
 
 /** Selector for the apply form side (right 2/5) of the detail panel.
- *  Observed class: `lg:w-2/5`. */
+ *  Observed class: `hidden w-2/5 lg:block` — the right panel uses `w-2/5` 
+ *  (not `lg:w-2/5`) while the left panel uses `lg:w-3/5`. */
 export const APPLY_FORM_SELECTOR =
-  /* Primary: right side with responsive width class */
-  `div[class*="lg:w-2/5"], ` +
-  /* Fallback: second child of modal */
-  `div[data-test="DiscoverModal"] > div:nth-child(2), ` +
-  `div[data-test="DiscoverModal"] div:last-child`
+  /* Primary: right side with width class (actual DOM: `w-2/5`, NOT `lg:w-2/5`) */
+  `div[class*="w-2/5"], ` +
+  /* Fallback: the right-side panel contains a form element */
+  `div[data-test="DiscoverModal"] div:has(form), ` +
+  /* Broad fallback: last significant child of the scroll container */
+  `div[data-test="DiscoverModal"] [class*="gap-12"] > div:last-child`
 
 /** Selector for textarea form fields in the apply form.
  *  Observed pattern: `textarea[name^="customQuestionAnswers["]`. */
@@ -230,11 +238,11 @@ export const REQUIRED_FIELD_SELECTOR =
 
 /** Selector for visible (non-hidden, non-submit, non-button) form fields
  *  in the right-side apply form area of the detail panel.
- *  Observed: the right 2/5 panel uses `lg:w-2/5`. */
+ *  Observed: the right 2/5 panel uses `w-2/5` (not `lg:w-2/5`). */
 export const FORM_FIELD_SELECTOR =
-  `div[class*="lg:w-2/5"] input:not([type="hidden"]):not([type="submit"]):not([type="button"]), ` +
-  `div[class*="lg:w-2/5"] textarea, ` +
-  `div[class*="lg:w-2/5"] select`
+  `div[class*="w-2/5"] input:not([type="hidden"]):not([type="submit"]):not([type="button"]), ` +
+  `div[class*="w-2/5"] textarea, ` +
+  `div[class*="w-2/5"] select`
 
 /* ── Navigation ── */
 
