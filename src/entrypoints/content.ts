@@ -49,18 +49,23 @@ async function createWidget(presetId: string): Promise<void> {
 
   // If widget already exists, update its state based on settings
   if (document.getElementById("sos-floating-widget")) {
-    await settingsManager.load()
-    const missing = settingsManager.getMissingMandatoryFields(presetId)
-    const newState: SiteWidgetState = missing.length === 0 ? "ready" : "idle"
-    // Only update if the widget is in a non-running state
-    if (widget && !["running", "starting", "paused"].includes(widget.getState())) {
-      widget.setState(newState)
+    const wfOverride = wellfoundPreset && presetId === wellfoundPreset.id
+    if (!wfOverride) {
+      await settingsManager.load()
+      const missing = settingsManager.getMissingMandatoryFields(presetId)
+      const newState: SiteWidgetState = missing.length === 0 ? "ready" : "idle"
+      // Only update if the widget is in a non-running state
+      if (widget && !["running", "starting", "paused"].includes(widget.getState())) {
+        widget.setState(newState)
+      }
     }
     return
   }
 
+  await settingsManager.load()
   const missing = settingsManager.getMissingMandatoryFields(presetId)
-  const initialState: SiteWidgetState = missing.length === 0 ? "ready" : "idle"
+  const isWellfound = wellfoundPreset && presetId === wellfoundPreset.id
+  const initialState: SiteWidgetState = isWellfound ? "ready" : (missing.length === 0 ? "ready" : "idle")
 
 
   widget?.destroy()
@@ -70,6 +75,7 @@ async function createWidget(presetId: string): Promise<void> {
     siteName: preset.name,
     siteId: preset.id,
     initialState,
+    skipSettingsValidation: isWellfound,
     onToggle: async (active) => {
 
       if (!active) return

@@ -165,6 +165,11 @@ export class FloatingWidget {
   private refreshState(): void {
     if (["running", "starting", "paused"].includes(this.curState)) return
 
+    // Wellfound override — no settings form, always ready
+    if (this.options.skipSettingsValidation) {
+      if (this.curState !== "ready") this.setState("ready")
+      return
+    }
 
     const ready = settingsManager.getMissingMandatoryFields(this.siteId).length === 0
     if (this.curState === "needsInfo" && !ready) return
@@ -378,6 +383,13 @@ export class FloatingWidget {
     if (this.curState === "idle" || this.curState === "needsInfo") {
 
       await this.persist()
+
+      // Wellfound override — skip validation, start immediately
+      if (this.options.skipSettingsValidation) {
+        this.startPipeline()
+        return
+      }
+
       const missing = settingsManager.getMissingMandatoryFields(this.siteId)
       if (missing.length === 0) {
         this.startPipeline()

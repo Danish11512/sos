@@ -252,7 +252,7 @@ src/
 
 | Phase | What | Details | Deliverable |
 |-------|------|---------|-------------|
-| **1** | Site preset + URL detection | Add WF to sites.ts, background detection, content script URL match | Widget appears on `wellfound.com/jobs` |
+| **1** | Site preset + URL detection | Add WF to sites.ts, background detection, content script URL match. **Override:** `skipSettingsValidation=true` so the Start button is immediately clickable without any settings | Widget appears on `wellfound.com/jobs` with a ready-to-click Start button |
 | **2** | Read job listings | Parse cards, extract title/company/salary, console log everything | `[SOS] [Wellfound] Found 12 jobs` |
 | **3** | Click + details | Click job → "Learn more" → verify detail panel | Can navigate through jobs |
 | **4** | Apply flow | Detect Apply button → click → fill modal → submit | First working application |

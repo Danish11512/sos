@@ -132,9 +132,17 @@ This allows:
 - Showing correct widget state on navigation back to search page
 - Multi-site independence (LinkedIn can be running while Indeed is idle)
 
-## State-Driven Logic Gates
+### Wellfound Override
 
-Each pipeline operation checks the current site state before running:
+Wellfound has **no settings form** — the widget goes straight to `ready` state via `skipSettingsValidation: true` on the `FloatingWidgetOptions`. This means:
+
+- `refreshState()` short-circuits: no mandatory-field check, always transitions to `ready`
+- `handleToggle()` skips validation: clicking Start in `idle`/`needsInfo` immediately starts the pipeline
+- The widget always appears with an active green Start button
+
+Other sites (LinkedIn, Indeed) continue using the standard validation flow.
+
+## State-Driven Logic Gates
 
 | Operation | Allowed States | Blocked States |
 |-----------|---------------|----------------|

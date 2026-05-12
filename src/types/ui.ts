@@ -56,5 +56,10 @@ export interface FloatingWidgetOptions {
   onResume?: () => void
   /** Current running state (controls button appearance) */
   initialState?: SiteWidgetState
+  /**
+   * Skip mandatory-field validation and go straight to "ready".
+   * Used by Wellfound which has no settings form.
+   */
+  skipSettingsValidation?: boolean
 }
 
