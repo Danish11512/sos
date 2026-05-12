@@ -1,13 +1,8 @@
 /**
- * Wellfound pipeline — Phase 3 (iteration + detail panel open/close).
+ * Wellfound pipeline — Phase 3 + Phase 5 (full apply flow).
  *
- * This phase reads all job previews from the page using
- * `readAllWellfoundPreviews()`, then iterates through each job:
- *   - Opens the detail panel (WF-6)
- *   - Logs apply type (native vs external based on `hasWellfoundBadge`)
- *   - Closes the detail panel (WF-7)
- *
- * Phase 4 will add the actual apply flow.
+ * Phase 3: Iteration + detail panel open/close.
+ * Phase 5: Apply flow — check already-applied, fill form, submit.
  *
  * Usage (from content.ts):
  *   await runWellfoundPipeline(abortController.signal, (msg) => {
@@ -30,13 +25,16 @@ import { eventBus } from "../utils/event-bus"
 import {
   APPLY_FORM_SELECTOR,
   DEFAULT_TEXTAREA_RESPONSE,
+  DETAIL_APPLY_BUTTON_SELECTOR,
   DETAIL_PANEL_CLOSE_SELECTOR,
   DETAIL_PANEL_OVERLAY_SELECTOR,
   DETAIL_PANEL_SELECTOR,
   DISABLED_BUTTON_SELECTOR,
   FORM_FIELD_SELECTOR,
+  FORM_TEXTAREA_SELECTOR,
   LEARN_MORE_BUTTON_SELECTOR,
   MODAL_CLOSE_BUTTON_SELECTOR,
+  MOBILE_APPLY_BUTTON_SELECTOR,
   REQUIRED_FIELD_SELECTOR,
   STARTUP_RESULT_SELECTOR,
   SUBMIT_BUTTON_SELECTOR,
@@ -121,9 +119,10 @@ export async function runWellfoundPipeline(
   console.log(`[SOS] [Wellfound] Found ${jobs.length} jobs`)
   onProgress?.(`Found ${jobs.length} job(s)`)
 
-  /* ── Phase 3: Iterate through each job ── */
+  /* ── Phase 3 + Phase 5: Iterate through each job ── */
   const total = jobs.length
   let appliedCount = 0
+  let alreadyAppliedCount = 0
   let skippedCount = 0
   let errorCount = 0
 
@@ -145,19 +144,31 @@ export async function runWellfoundPipeline(
       continue
     }
 
-    /* ── Native-apply badge present — proceed with opening details ── */
+    /* ── Native-apply badge present — proceed with Phase 5 flow ── */
+
+    /* Phase 5 — Step 1: Check if already applied */
+    if (isWellfoundAlreadyApplied(job.element)) {
+      console.log(
+        `[SOS] [Wellfound] [${indexStr}] Already applied: ${job.title} @ ${job.company}`,
+      )
+      alreadyAppliedCount++
+      onProgress?.(
+        `[${indexStr}] Already applied: ${job.title} @ ${job.company}`,
+      )
+      continue
+    }
+
+    /* ── Log intent to apply ── */
     console.log(
       `[SOS] [Wellfound] [${indexStr}] Applying (native): ${job.title} @ ${job.company}`,
     )
-    appliedCount++
     onProgress?.(
       `[${indexStr}] Applying (native): ${job.title} @ ${job.company}`,
     )
 
-    /* Step 1: Open the job detail panel (WF-6) */
+    /* Phase 5 — Step 2: Open the job detail panel (WF-6) */
     const modal = await openWellfoundJobDetails(job, signal)
 
-    /* Step 2: Log detail panel opened */
     if (modal) {
       console.log(
         `[SOS] [Wellfound] [${indexStr}] Detail panel opened for ${job.title} @ ${job.company}`,
@@ -172,34 +183,62 @@ export async function runWellfoundPipeline(
 
     signal.throwIfAborted()
 
-    /* Step 3: Visual feedback delay */
-    await randomDelay(1000, 2000, signal)
+    /* Phase 5 — Step 3: Fill the application form */
+    const filled = await fillWellfoundApplicationForm(modal, signal)
+    if (!filled) {
+      console.log(
+        `[SOS] [Wellfound] [${indexStr}] Form fill timed out or skipped for ${job.title} @ ${job.company} — closing panel`,
+      )
+      // Try to close the panel as fallback
+      await closeWellfoundDetailPanel(modal, signal).catch(() => {})
+      continue
+    }
 
     signal.throwIfAborted()
 
-    /* Step 4: Close the detail panel (WF-7) */
-    const closed = await closeWellfoundDetailPanel(modal, signal)
-
-    /* Step 5: Log panel closed */
-    if (closed) {
+    /* Phase 5 — Step 4: Submit the application */
+    const submitted = await submitWellfoundApplication(modal, signal)
+    if (submitted) {
+      appliedCount++
       console.log(
-        `[SOS] [Wellfound] [${indexStr}] Detail panel closed for ${job.title} @ ${job.company}`,
+        `[SOS] [Wellfound] [${indexStr}] ✅ Submitted: ${job.title} @ ${job.company}`,
+      )
+      onProgress?.(
+        `[${indexStr}] ✅ Submitted: ${job.title} @ ${job.company}`,
       )
     } else {
-      console.warn(
-        `[SOS] [Wellfound] [${indexStr}] Detail panel may not have closed cleanly for ${job.title} @ ${job.company}`,
-      )
       errorCount++
+      console.warn(
+        `[SOS] [Wellfound] [${indexStr}] ❌ Submission failed for ${job.title} @ ${job.company}`,
+      )
+      onProgress?.(
+        `[${indexStr}] ❌ Submission failed: ${job.title} @ ${job.company}`,
+      )
     }
+
+    /* Phase 5 — Step 5: Ensure modal is closed after each job */
+    // submitWellfoundApplication already closes the modal on success;
+    // if it didn't (submission failure), close it as fallback.
+    signal.throwIfAborted()
+    const panelStillOpen = !!document.querySelector(DETAIL_PANEL_SELECTOR)
+    if (panelStillOpen) {
+      console.log(
+        `[SOS] [Wellfound] [${indexStr}] Closing detail panel as fallback for ${job.title} @ ${job.company}`,
+      )
+      await closeWellfoundDetailPanel(modal, signal).catch(() => {})
+    }
+
+    /* Phase 5 — Step 6: Brief delay between jobs */
+    await randomDelay(1500, 3000, signal)
   }
 
-  /* ── Phase 3 done ── */
+  /* ── Pipeline complete ── */
   signal.throwIfAborted()
   console.log(
-    `[SOS] [Wellfound] Pipeline complete: ${appliedCount} applied, ${skippedCount} skipped (external), ${errorCount} errors out of ${total} total.`,
+    `[SOS] [Wellfound] Pipeline complete: ${appliedCount} applied, ${alreadyAppliedCount} already applied, ${skippedCount} skipped (external), ${errorCount} errors out of ${total} total.`,
   )
   onProgress?.(
-    `Pipeline complete: ${appliedCount} applied, ${skippedCount} skipped, ${errorCount} errors out of ${total} total.`,
+    `Pipeline complete: ${appliedCount} applied, ${alreadyAppliedCount} already applied, ${skippedCount} skipped, ${errorCount} errors out of ${total} total.`,
   )
 }
 
