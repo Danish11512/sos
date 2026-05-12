@@ -120,10 +120,10 @@ async function createWidget(presetId: string): Promise<void> {
         pipelineActive = true
         widget?.setState("running")
         try {
-          const ok = await runWellfoundPipeline(abortController.signal, (msg) => {
+          await runWellfoundPipeline(abortController.signal, (msg) => {
             widget?.setProgress(msg)
           })
-          if (ok) widget?.setDone()
+          widget?.setDone()
         } catch (err: unknown) {
           if (err instanceof Error && err.name === "AbortError") {
             widget?.setStopped()
