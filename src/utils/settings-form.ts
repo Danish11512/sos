@@ -408,7 +408,12 @@ export class SettingsForm {
   /* ================================================================ */
 
   private html(): string {
-    return `
+    return FORM_HTML_TEMPLATE()
+  }
+}
+
+/* ── Hoisted HTML template string (constant, created once at module load) ── */
+const FORM_HTML_TEMPLATE = (): string => `
       <div class="sos-section sos-section-open">
         <div class="sos-section-header" data-section="personal">
           <span class="sos-section-title">Personal Info</span>
@@ -615,5 +620,3 @@ export class SettingsForm {
         <button class="sos-save-btn">Save Settings</button>
       </div>
     `
-  }
-}
