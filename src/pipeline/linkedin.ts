@@ -5,7 +5,8 @@
  *   - Search terms: DOM manipulation of the search input + Enter key
  *   - URL filters (f_E, f_JT, f_WT, etc.): Try pushState+popstate events first,
  *     fall back to DOM interaction with LinkedIn's filter dropdown buttons
- *   - DOM-only toggles (under 10 applicants, in your network): "All filters" modal
+ *   - DOM-only toggles (under 10 applicants, in your network, fair chance employer):
+ *     "All filters" modal with filter-bar toggle fallback for fair chance employer
  *
  * Wait Strategy (no time-based delays):
  *   - All waits use MutationObserver-based waitForCondition() instead of delay()
@@ -74,6 +75,7 @@ import {
   FILTER_BTN_JOB_TYPE,
   FILTER_BTN_ON_SITE,
   FILTER_BTN_EASY_APPLY,
+  FILTER_BTN_FAIR_CHANCE,
   FILTER_BTN_SORT,
   FILTER_DROPDOWN_PANEL,
   FILTER_OPTION_TEXT,
@@ -1041,6 +1043,11 @@ function buildFilterUrl(
     url.searchParams.set("f_AL", "true")
   }
 
+  // Fair Chance Employer (f_FC) — optional toggle
+  if (site.filters.fairChanceEmployer) {
+    url.searchParams.set("f_FC", "true")
+  }
+
   return url
 }
 
@@ -1211,10 +1218,71 @@ export async function toggleUnder10ApplicantsFilter(
 /* ── DOM-only filter application (post-nav) ── */
 
 /**
- * Apply DOM-only filters via the "All filters" modal.
- * "In Your Network" and "Under 10 applicants" are now handled separately via
- * the filter-bar radio toggles (see toggleInYourNetworkFilter and
- * toggleUnder10ApplicantsFilter above), while the rest use the modal.
+ * Try to toggle a filter-bar toggle button (e.g. Easy Apply, Fair chance employer).
+ * Looks for a filter bar toggle button and checks its active/selected state.
+ * Returns true if the button was found and toggled on.
+ */
+async function tryToggleFilterBarButton(
+  selector: string,
+  clickDelayMs: number,
+  signal?: AbortSignal
+): Promise<boolean> {
+  const btn = document.querySelector<HTMLElement>(selector) ||
+    findFilterButtonFromBar("fair chance employer") as HTMLElement | null
+
+  if (!btn) return false
+
+  const isPressed = btn.getAttribute("aria-pressed") === "true"
+  const isSelected = btn.getAttribute("aria-checked") === "true"
+  const hasActiveClass = btn.classList.contains("jobs-search-results-list__filter-button--active")
+
+  if (!isPressed && !isSelected && !hasActiveClass) {
+    scrollAndClick(btn)
+    await delay(clickDelayMs, signal)
+    console.log("[SOS] LinkedIn: Toggled filter-bar button ON")
+    return true
+  }
+
+  console.log("[SOS] LinkedIn: Filter-bar button already active")
+  return true
+}
+
+/**
+ * Find a filter bar button by its text or aria-label content (case-insensitive, partial match).
+ * Searches all filter buttons in the results filter bar.
+ */
+function findFilterButtonFromBar(text: string): Element | null {
+  const selectors = [
+    "button.jobs-search-results-list__filter-button",
+    "button[aria-label*='filter']",
+    "button[aria-label*='Filter']",
+    "div[role='button']:has(div[aria-label*='Filter'])",
+  ]
+  for (const btn of document.querySelectorAll<HTMLElement>(selectors.join(", "))) {
+    const btnText = btn.textContent?.trim().toLowerCase() || ""
+    const ariaLabel = btn.getAttribute("aria-label")?.toLowerCase() || ""
+    // Also check inner div aria-labels (current CSS-module design)
+    const innerAriaLabel = btn.querySelector<HTMLElement>("[aria-label]")?.getAttribute("aria-label")?.toLowerCase() || ""
+    if (btnText.includes(text.toLowerCase()) ||
+        ariaLabel.includes(text.toLowerCase()) ||
+        innerAriaLabel.includes(text.toLowerCase())) {
+      return btn
+    }
+  }
+  return null
+}
+
+/**
+ * Apply DOM-only filters via the "All filters" modal or filter-bar toggles.
+ *
+ * Strategy (adaptive to LinkedIn's current DOM):
+ *   1. "In Your Network" — handled via its own filter-bar radio toggle
+ *      (see toggleInYourNetworkFilter above).
+ *   2. "Under 10 applicants" — handled via its own filter-bar radio toggle
+ *      (see toggleUnder10ApplicantsFilter above).
+ *   3. "Fair chance employer" — first try the filter-bar toggle (like Easy Apply).
+ *      If not found in the filter bar, fall back to the "All filters" modal checkbox.
+ *
  * Uses waitForElement (MutationObserver) instead of time-based delays.
  */
 async function applyDomFilters(
@@ -1239,17 +1307,29 @@ async function applyDomFilters(
     result.errors.push("Failed to toggle Under 10 applicants filter in filter bar")
   }
 
-  // Only Fair chance employer still uses the "All filters" modal
-  const domFilters = [
-    { enabled: site.filters.fairChanceEmployer, label: "Fair chance employer" },
-  ]
+  // Try filter-bar toggle for Fair chance employer; if not found, fall back to modal
+  let fairChanceApplied = false
+  if (site.filters.fairChanceEmployer) {
+    fairChanceApplied = await tryToggleFilterBarButton(FILTER_BTN_FAIR_CHANCE, clickDelayMs, signal)
+    if (fairChanceApplied) {
+      result.appliedCount++
+      console.log("[SOS] LinkedIn: Fair chance employer toggled via filter bar")
+    } else {
+      console.log("[SOS] LinkedIn: Fair chance employer not found in filter bar — will try modal")
+    }
+  }
 
-  if (!domFilters.some((f) => f.enabled)) {
+  // Only Fair chance employer still uses the "All filters" modal (if not handled via filter bar)
+  const modalFilters = [
+    { enabled: site.filters.fairChanceEmployer && !fairChanceApplied, label: "Fair chance employer" },
+  ].filter((f) => f.enabled)
+
+  if (modalFilters.length === 0) {
     console.log("[SOS] LinkedIn: No DOM-only filters to apply via modal (all handled via filter bar toggles)")
     return result
   }
 
-  console.log("[SOS] LinkedIn: Opening 'All filters' modal for DOM-based filters")
+  console.log("[SOS] LinkedIn: Opening 'All filters' modal for remaining DOM-based filters")
 
   const allFiltersBtn =
     (await waitForElement(ALL_FILTERS_BUTTON_SELECTORS, 6_000, signal)) ??
@@ -1266,6 +1346,10 @@ async function applyDomFilters(
     })()
 
   if (!allFiltersBtn) {
+    if (fairChanceApplied) {
+      console.log("[SOS] LinkedIn: 'All filters' button not found — fair chance already applied via filter bar")
+      return result
+    }
     result.errors.push("Could not find 'All filters' button on LinkedIn")
     result.success = false
     console.warn("[SOS] LinkedIn: ⚠️ Could not find 'All filters' button — DOM-only filters will not be applied")
@@ -1292,13 +1376,17 @@ async function applyDomFilters(
   }
 
   if (!modalContainer) {
+    if (fairChanceApplied) {
+      console.log("[SOS] LinkedIn: Filter modal not found — fair chance already applied via filter bar")
+      return result
+    }
     result.errors.push("Could not find LinkedIn filter modal")
     result.success = false
     console.warn("[SOS] LinkedIn: ⚠️ Could not open filter modal — DOM-only filters skipped")
     return result
   }
 
-  result.appliedCount += await toggleCheckboxItems(modalContainer, domFilters, clickDelayMs, signal)
+  result.appliedCount += await toggleCheckboxItems(modalContainer, modalFilters, clickDelayMs, signal)
 
   const applyBtn =
     (await waitForElement(SHOW_RESULTS_BUTTON_SELECTORS, 5_000, signal)) ??
@@ -1724,7 +1812,7 @@ export async function testApplyUrlFilters(site: SiteSettings): Promise<boolean> 
  * Verifies the "All filters" modal can be opened, checkboxes toggled, and results applied.
  * "In Your Network" is handled via the filter-bar radio toggle (not in the modal).
  * Usage: call from browser console:
- *   testApplyDomFilters({ filters: { under10Applicants: true, inYourNetwork: true } })
+ *   testApplyDomFilters({ filters: { under10Applicants: true, inYourNetwork: true, fairChanceEmployer: true } })
  */
 export async function testApplyDomFilters(site: SiteSettings): Promise<boolean> {
   console.log("[SOS TEST] Testing applyDomFilters...")
@@ -1732,6 +1820,9 @@ export async function testApplyDomFilters(site: SiteSettings): Promise<boolean> 
     const result = await applyDomFilters(site, 300, undefined)
     if (result.success) {
       console.log(`[SOS TEST] PASS: DOM filters applied (${result.appliedCount} toggled)`)
+      if (site.filters.fairChanceEmployer) {
+        console.log("[SOS TEST]   - Fair chance employer was requested (check filter bar or modal)")
+      }
     } else {
       console.warn("[SOS TEST] WARN: DOM filters had errors:", result.errors)
     }
@@ -1987,6 +2078,7 @@ export async function runLinkedInPipeline(
     }
 
     // Step 6c: Apply DOM-based filters (under 10 applicants, in your network, fair chance employer)
+    // Fair chance employer is first tried as a filter-bar toggle; if not found, it falls back to the modal.
     const domResult = await applyDomFilters(site, site.pipeline.clickDelayMs, signal)
     if (!domResult.success) {
       console.warn("[SOS] LinkedIn: DOM filter application had errors:", domResult.errors)

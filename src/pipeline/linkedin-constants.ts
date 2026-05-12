@@ -155,7 +155,7 @@ export const SORT_MAP: Record<string, string> = {
 }
 
 /** Filter URL param keys cleaned before rebuilding. */
-export const FILTER_URL_PARAMS = ["f_SB2", "f_TPR", "f_E", "f_JT", "f_WT", "f_AL", "f_CF"]
+export const FILTER_URL_PARAMS = ["f_SB2", "f_TPR", "f_E", "f_JT", "f_WT", "f_AL", "f_CF", "f_FC"]
 
 /** Date posted text keys for cycling. These are looked up in DATE_POSTED_MAP and FILTER_OPTION_TEXT. */
 export const DATE_POSTED_VALUES = ["past 24 hours", "past week", "past month"]
@@ -305,6 +305,16 @@ export const FILTER_BTN_EASY_APPLY =
   "div[role='button']:has(div[aria-label*='Filter by Easy Apply']), " +
   "button[aria-label*='Easy Apply filter'], " +
   "button[aria-label*='easy apply']"
+
+/** Filter toggle button: Fair chance employer.
+ *  Current LinkedIn CSS-module design: appears either as a toggle in the filter bar
+ *  (like Easy Apply) with aria-label*='Filter by Fair chance employer', or as a
+ *  checkbox inside the "All filters" modal.
+ *  The selector covers both the in-bar pill toggle and the modal checkbox trigger. */
+export const FILTER_BTN_FAIR_CHANCE =
+  "div[role='button']:has(div[aria-label*='Filter by Fair chance employer']), " +
+  "button[aria-label*='Fair chance employer filter'], " +
+  "button[aria-label*='fair chance employer']"
 
 /** Filter dropdown button: Sort by.
  *  Current LinkedIn CSS-module design: div[role='button'] with inner div[aria-label*='Sort by']. */
