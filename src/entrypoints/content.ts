@@ -28,6 +28,9 @@ if (typeof window !== "undefined") {
 }
 
 
+/** Wellfound site preset reference (used instead of hardcoding the site ID string). */
+const wellfoundPreset = sitePresets.find((p) => p.id === "wellfound")
+
 let widget: FloatingWidget | null = null
 let widgetInitializedUrl = ""
 let abortController: AbortController | null = null
@@ -106,15 +109,15 @@ async function createWidget(presetId: string): Promise<void> {
           abortController = null
         }
 
-      } else if (presetId === "wellfound") {
+      } else if (wellfoundPreset && presetId === wellfoundPreset.id) {
         abortController = new AbortController()
         pipelineActive = true
         widget?.setState("running")
         try {
-          await runWellfoundPipeline(abortController.signal, (msg) => {
+          const ok = await runWellfoundPipeline(abortController.signal, (msg) => {
             widget?.setProgress(msg)
           })
-          widget?.setDone()
+          if (ok) widget?.setDone()
         } catch (err: unknown) {
           if (err instanceof Error && err.name === "AbortError") {
             widget?.setStopped()
