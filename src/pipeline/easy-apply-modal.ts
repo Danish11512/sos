@@ -99,6 +99,7 @@ interface FormElement {
 /**
  * Find all unanswered form elements in the modal.
  * Skips elements that already have a value selected/filled.
+ * Scopes all querySelector calls to the modal container for performance.
  */
 function findFormElements(modal: Element): FormElement[] {
   const results: FormElement[] = []
@@ -812,7 +813,7 @@ async function handleStuck(
       return "exit"
     }
 
-    // Check if the question is now answered
+    // Check if the question is now answered (user may have filled it while paused)
     const stillStuck = findFormElements(modal).length > 0
     if (stillStuck) {
       console.log(`[SOS] EasyApply: Still stuck after user help — marking as failure`)
@@ -1017,8 +1018,9 @@ export async function clickEasyApplyButton(
  * Uses waitForCondition to confirm the modal actually closed.
  */
 export async function closeEasyApplyModal(): Promise<boolean> {
-  const modal = document.querySelector(EASY_APPLY_MODAL_SELECTOR)
-  if (!modal) {
+  // Cache the modal ref — avoids repeated full-DOM queries for the same element
+  let cachedModal = document.querySelector(EASY_APPLY_MODAL_SELECTOR)
+  if (!cachedModal) {
     console.log("[SOS] LinkedIn: Modal already closed — skipping close")
     return true
   }
@@ -1048,8 +1050,7 @@ export async function closeEasyApplyModal(): Promise<boolean> {
   if (await waitForModalClose(2_000)) return true
 
   // Strategy 3: Dispatch Escape directly on the modal element (React portals capture events on the modal itself)
-  const modalEl = document.querySelector(EASY_APPLY_MODAL_SELECTOR)
-  if (modalEl) {
+  if (cachedModal) {
     const escEvent = new KeyboardEvent("keydown", {
       key: "Escape",
       code: "Escape",
@@ -1059,17 +1060,23 @@ export async function closeEasyApplyModal(): Promise<boolean> {
       cancelable: true,
       composed: true,
     })
-    modalEl.dispatchEvent(escEvent)
+    cachedModal.dispatchEvent(escEvent)
     console.log("[SOS] LinkedIn: Dispatched Escape key directly on modal element (strategy 3)")
     if (await waitForModalClose(2_000)) return true
   }
 
   // Strategy 4: DOM-level removal
   console.log("[SOS] LinkedIn: Modal still present — removing from DOM (strategy 4)")
-  const easyApplyModal = document.querySelector(EASY_APPLY_MODAL_SELECTOR)
-  if (easyApplyModal) {
-    easyApplyModal.remove()
+  // Re-use cached modal ref instead of re-querying the DOM
+  if (cachedModal && document.contains(cachedModal)) {
+    cachedModal.remove()
     console.log("[SOS] LinkedIn: Removed Easy Apply modal element")
+  } else {
+    // Cache might be stale if the DOM changed — re-query
+    const freshModal = document.querySelector(EASY_APPLY_MODAL_SELECTOR)
+    if (freshModal) {
+      freshModal.remove()
+    }
   }
 
   document.querySelectorAll(
