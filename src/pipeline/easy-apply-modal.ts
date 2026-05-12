@@ -454,13 +454,14 @@ async function clickSubmitApplication(
   scrollAndClick(submitBtn)
 
   // FIX F60: Use Promise.race to handle both confirmation modal and signal abort
-  // The delay is a safety net — the MutationObserver should win normally.
-  // Increased from 2s to 5s to avoid the delay winning before the modal appears.
+  // The observer uses a LONGER fallback timeout (8s) than the race delay (5s),
+  // so the observer has a reasonable chance to detect the modal before the
+  // safety-net delay wins. This prevents the delay from always winning.
   try {
     await Promise.race([
       delay(5_000, signal),
       new Promise<void>((resolve) => {
-        // Wait for confirmation modal to appear
+        // Wait for confirmation modal to appear via MutationObserver
         const observer = new MutationObserver(() => {
           const confirmModal = document.querySelector(
             ".artdeco-modal--confirmation, " +
@@ -473,11 +474,12 @@ async function clickSubmitApplication(
           }
         })
         observer.observe(document.body, { childList: true, subtree: true })
-        // Fallback timeout (equal to the race delay)
+        // Fallback timeout — longer than the race delay so the observer
+        // has a chance to detect the modal before this fires.
         setTimeout(() => {
           observer.disconnect()
           resolve()
-        }, 5_000)
+        }, 8_000)
       }),
     ])
   } catch {

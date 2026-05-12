@@ -171,13 +171,14 @@ async function createWidget(presetId: string): Promise<void> {
           abortController = new AbortController()
           widget?.setState("running")
           widget?.setProgress(`Resuming: "${resumeState.searchTerm}"...`)
-          // Clear resume state only after the pipeline has begun starting,
-          // preventing a double-start race condition if something fails before this point.
-          await clearResumeState()
           try {
             await runLinkedInPipeline(site, abortController.signal, (msg) => {
               widget?.setProgress(msg)
             }, resumeState.termIndex)
+            // Pipeline started successfully — clear resume state NOW
+            // (after pipeline has begun executing, not before, to avoid
+            // losing the resume state if the pipeline fails early).
+            await clearResumeState()
             widget?.setDone()
           } catch (err: unknown) {
             if (err instanceof Error && err.name === "AbortError") {
@@ -187,6 +188,7 @@ async function createWidget(presetId: string): Promise<void> {
               widget?.setError(msg)
             }
           } finally {
+            await clearResumeState()
             try {
               discardApplication()
             } catch (e) {
@@ -214,7 +216,7 @@ interface PipelineState {
 
 async function startLegacyPipeline(presetId: string): Promise<void> {
   const settings: AppSettings = await loadSettings()
-  const site = settings.perSite[presetId]
+  const site = settings.perSite?.[presetId]
   if (!site || site.search.searchTerms.length === 0) return
 
   const state: PipelineState = {

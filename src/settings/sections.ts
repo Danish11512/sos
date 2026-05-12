@@ -124,6 +124,7 @@ export interface PipelineSettings {
   closeTabs: boolean; followCompanies: boolean; runNonStop: boolean; runInBackground: boolean
   alternateSortby: boolean; cycleDatePosted: boolean; stopDateCycleAt24hr: boolean
   clickDelayMs: number
+  maxJobs: number
 }
 
 export const DEFAULT_PIPELINE: PipelineSettings = {
@@ -131,6 +132,7 @@ export const DEFAULT_PIPELINE: PipelineSettings = {
   closeTabs: false, followCompanies: false, runNonStop: false, runInBackground: false,
   alternateSortby: true, cycleDatePosted: true, stopDateCycleAt24hr: true,
   clickDelayMs: 500,
+  maxJobs: 25,
 }
 
 

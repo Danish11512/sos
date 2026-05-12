@@ -20,12 +20,12 @@ import type { AppSettings } from "../settings/sections"
 export interface EventMap {
   "state-changed": { from: SiteWidgetState; to: SiteWidgetState; siteId: string }
   "settings-changed": { settings: AppSettings }
-  "pipeline-progress": { message: string; siteId: string }
+  "pipeline-progress": { stage: string; detail: string; pct?: number }
   "stop-requested": { siteId: string }
   "pause-requested": { siteId: string; jobTitle: string; company: string }
   "resume-requested": { siteId: string }
   "start-requested": { siteId: string }
-  "pipeline-error": { message: string; siteId: string }
+  "pipeline-error": { stage: string; message: string; jobIndex?: number; consecutiveFailures?: number; fatal?: boolean }
   "pipeline-done": { siteId: string }
   "url-changed": { url: string }
   "pause-for-help": { siteId: string; questionLabel: string; questionType: string }

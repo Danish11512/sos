@@ -15,10 +15,10 @@
 import type { AppSettings } from "../settings/sections"
 import { loadSettings } from "../utils/storage"
 import { eventBus } from "../utils/event-bus"
-import { runIndeedPipeline, applyIndeedExtraFilters } from "./indeed"
-import type { ApplyFiltersResult, ScrapeJobResult, PipelineError, ConsecutiveFailuresError, NoJobsError, JobTimeoutError } from "./types"
+import { applyIndeedExtraFilters } from "./indeed"
+import type { ApplyFiltersResult, ScrapeJobResult, PipelineError } from "./types"
 
-export type { ApplyFiltersResult, ScrapeJobResult, PipelineError, ConsecutiveFailuresError, NoJobsError, JobTimeoutError }
+export type { ApplyFiltersResult, ScrapeJobResult, PipelineError }
 
 /* ── Error classes ── */
 
@@ -72,26 +72,20 @@ async function getSiteSettings(siteId: string): Promise<AppSettings["perSite"][s
 /* ── Orchestrated per-job loop with recovery ── */
 
 /**
- * Run outer pipeline loop with error recovery.
+ * Pipeline pre-processing orchestrator.
  *
- * Stages:
+ * This handles pre-processing before site-specific pipelines take over:
  *  1. loadSiteConfig
- *  2. applyPostNavFilters
- *  3. collectJobCards
- *  4. filterByCompany
- *  5. for each job card:
- *      5a. readDescription
- *      5b. validateJob
- *      5c. clickEasyApply
- *      5d. fillModal
- *      5e. submit
+ *  2. applyPostNavFilters (e.g., Indeed "All filters" modal)
  *
- * If any stage fails we emit an error event and decide whether to abort or skip.
+ * Per-job processing (clicking cards, reading descriptions, Easy Apply) is
+ * delegated to site-specific pipelines (runLinkedInPipeline, runIndeedPipeline)
+ * which are called directly from content.ts, not through this function.
+ *
+ * If any stage fails we emit an error event.
  */
 export async function runPipeline(siteId: string): Promise<ApplyFiltersResult> {
   const result: ApplyFiltersResult = { success: true, appliedCount: 0, errors: [] }
-  let consecutiveFailures = 0
-  const MAX_CONSECUTIVE_FAILURES = 3
 
   emitProgress("init", "Loading site settings…")
 
@@ -103,7 +97,7 @@ export async function runPipeline(siteId: string): Promise<ApplyFiltersResult> {
     return { success: false, appliedCount: 0, errors: [err.message] }
   }
 
-  // Stage 2 — post-navigation filters
+  // Stage 2 — post-navigation filters (e.g., Indeed's "All filters" modal toggles)
   try {
     emitProgress("filters", "Applying filters…")
     const filterResult = await runPipelineStage("applyPostNavFilters", () => applyPostNavFilters(siteId))
@@ -116,50 +110,12 @@ export async function runPipeline(siteId: string): Promise<ApplyFiltersResult> {
     // Filters are non-critical — continue
   }
 
-  // Stage 3 — collect job cards (only for site pipelines that use captureJobs; LinkedIn handles internally)
-  let jobs: ScrapeJobResult["jobs"] = []
-  if (siteId === "linkedin") {
-    emitProgress("collect", "Reading job cards from LinkedIn…")
-    // LinkedIn handles this internally in the content script via export functions
-    // Nothing to capture here
-  } else if (siteId === "indeed") {
-    try {
-      emitProgress("collect", "Capturing job listings…")
-      const captured = await runPipelineStage("captureJobs", () => captureJobs(siteId, site.pipeline.maxJobs ?? 25))
-      jobs = captured.jobs
-      if (captured.errors.length) result.errors.push(...captured.errors)
-    } catch (err: any) {
-      const pipelineErr: PipelineError = { stage: "captureJobs", message: err?.message ?? "Unknown error", fatal: true }
-      emitError(pipelineErr)
-      return { success: false, appliedCount: result.appliedCount, errors: [...result.errors, pipelineErr.message] }
-    }
-  }
-
-  // Empty-state check
-  if (siteId !== "linkedin" && jobs.length === 0) {
-    const noJobsErr: NoJobsError = { stage: "captureJobs", message: "No job listings found" }
-    emitError(noJobsErr)
-    result.errors.push(noJobsErr.message)
-    return result
-  }
-
-  // Stage 5 — per-job loop
-  const maxJobs = siteId === "linkedin" ? (site.pipeline.maxJobs ?? 25) : jobs.length
-  emitProgress("applying", `Starting per-job loop (up to ${maxJobs})…`)
-
-  for (let i = 0; i < maxJobs; i++) {
-    // Per-job processing is delegated to site-specific pipelines
-    // (runLinkedInPipeline, runIndeedPipeline) which handle their own
-    // loops internally. This orchestrator-level loop tracks overall
-    // progress and enforces the max-jobs cap.
-
-    emitProgress("processing", `Job ${i + 1} of ${maxJobs}`, Math.round(((i) / maxJobs) * 100))
-    console.log(`[SOS] Pipeline: Processing job ${i + 1}/${maxJobs}`)
-
-    // Reset consecutive failures — the site-specific pipeline reports
-    // its own errors via the event bus.
-    consecutiveFailures = 0
-  }
+  // Per-job processing is delegated to site-specific pipelines
+  // (runLinkedInPipeline, runIndeedPipeline) which are called directly
+  // from content.ts. This orchestrator handles pre-processing only
+  // (filter application, etc.).
+  // For LinkedIn, runLinkedInPipeline in linkedin.ts is called directly.
+  // For Indeed, the legacy pipeline in content.ts handles everything.
 
   emitProgress("done", "Pipeline complete", 100)
   result.success = result.errors.length === 0

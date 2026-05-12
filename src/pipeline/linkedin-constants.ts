@@ -81,11 +81,13 @@ export const EASY_APPLY_BUTTON_SELECTOR =
   "button[aria-label*='Apply'], " +
   "button.jobs-apply-button--primary"
 
-/** Selector for external apply links (redirect off LinkedIn). */
+/** Selector for external apply links (redirect off LinkedIn).
+ *  NOTE: Deliberately avoids `a[href*='/jobs/view/']` which matches normal
+ *  LinkedIn job detail links — only matches actual external apply anchors. */
 export const EXTERNAL_APPLY_SELECTOR =
-  "a[href*='/jobs/view/'], " +
   "a.jobs-apply-button--external, " +
-  "a[data-tracking-control-name*='external_job']"
+  "a[data-tracking-control-name*='external_job'], " +
+  "a[href*='apply-url']"
 
 /** Selector for the Easy Apply modal. */
 export const EASY_APPLY_MODAL_SELECTOR =
@@ -102,11 +104,11 @@ export const EASY_APPLY_CLOSE_SELECTOR =
   "button.jobs-easy-apply-modal__close-btn, " +
   ".artdeco-modal__dismiss"
 
-/** LinkedIn jobs search page base URL. */
-export const LINKEDIN_JOBS_SEARCH_URL = "https://www.linkedin.com/jobs/search-results/"
+/** LinkedIn jobs search page base URL (current LinkedIn SPA path). */
+export const LINKEDIN_JOBS_SEARCH_URL = "https://www.linkedin.com/jobs/search/"
 
 /** URL path fragment that identifies a search results page. */
-export const SEARCH_PAGE_PATH = "/jobs/search-results/"
+export const SEARCH_PAGE_PATH = "/jobs/search/"
 
 /* ── URL param maps ── */
 
@@ -192,12 +194,6 @@ export const EMPTY_STATE_SELECTOR =
 
 /* ── New LinkedIn CSS-module design selectors (2026 redesign) ── */
 
-/** Selector for the job card container wrapper in the new design. */
-export const NEW_CARD_WRAPPER_SELECTOR =
-  "div[data-job-id], " +
-  "div[data-occludable-job-id], " +
-  "div.job-card-container"
-
 /** Selector for the job list column in the new design (LazyColumn). */
 export const NEW_LIST_COLUMN_SELECTOR =
   "div[data-testid='lazy-column'][data-component-type='LazyColumn'], " +
@@ -222,13 +218,6 @@ export const NEW_CARD_TITLE_SELECTOR =
   "a.job-card-list__title, " +
   "span.job-card-container__primary-description"
 
-/** Selector for job title visual text in new design cards (aria-hidden span).
- *  Current LinkedIn CSS-module design: the visual title is a span[aria-hidden='true']
- *  inside a <p> that also contains a span.e94a47cd for screen-reader text. */
-export const NEW_CARD_TITLE_VISUAL_SELECTOR =
-  "p:has(> span.e94a47cd) span[aria-hidden='true'], " +
-  "span[aria-hidden='true']"
-
 /** Selector for company name in new design cards.
  *  Current LinkedIn CSS-module design (May 2026): company name is in
  *  a p with hashed classes inside a div._6142bcff. */
@@ -250,22 +239,6 @@ export const NEW_CARD_LOCATION_SELECTOR =
   /* Legacy designs */
   "li.job-card-container__metadata-item, " +
   "span.job-card-container__metadata-item"
-
-/** Selector for the main workspace container in new design. */
-export const NEW_WORKSPACE_SELECTOR =
-  "main#workspace, " +
-  "div.scaffold-layout"
-
-/** Selector for the results header showing count in new design. */
-export const NEW_RESULTS_HEADER_SELECTOR =
-  "div.jobs-search-results-list__header, " +
-  "h1.jobs-search-results-list__title, " +
-  "span.jobs-search-results-list__text"
-
-/** Selector for pagination indicators in new design. */
-export const NEW_PAGINATION_SELECTOR =
-  "div[data-testid^='pagination-indicator-'], " +
-  "div.jobs-search-results-list__pagination"
 
 /** Selector for the search results type filter bar (Jobs, Posts, Courses, People toggles).
  *  Current LinkedIn CSS-module design: div[role='button'][tabindex='0'] with checkbox-style toggles.
