@@ -68,7 +68,7 @@ async function createWidget(presetId: string): Promise<void> {
       if (presetId === "linkedin") {
         await settingsManager.load()
         const settings: AppSettings = await loadSettings()
-        const site = settings.perSite[presetId]
+        const site = settings.perSite?.[presetId] ?? null
         if (!site || site.search.searchTerms.length === 0) {
           console.warn("[SOS] No search terms configured")
           return
@@ -160,19 +160,20 @@ async function createWidget(presetId: string): Promise<void> {
     const resumeState = await loadResumeState()
     if (resumeState) {
       console.log("[SOS] Detected resume state — auto-starting pipeline after page refresh")
-      // Clear the resume flag immediately to prevent double-start
-      await clearResumeState()
 
       // Load settings and start the pipeline
       await settingsManager.load()
       const settings: AppSettings = await loadSettings()
-      const site = settings.perSite[presetId]
+      const site = settings.perSite?.[presetId] ?? null
       if (site && site.search.searchTerms.length > 0) {
         // Use a small delay to let the page fully render
         setTimeout(async () => {
           abortController = new AbortController()
           widget?.setState("running")
           widget?.setProgress(`Resuming: "${resumeState.searchTerm}"...`)
+          // Clear resume state only after the pipeline has begun starting,
+          // preventing a double-start race condition if something fails before this point.
+          await clearResumeState()
           try {
             await runLinkedInPipeline(site, abortController.signal, (msg) => {
               widget?.setProgress(msg)

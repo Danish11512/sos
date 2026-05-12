@@ -16,6 +16,8 @@ export type SiteWidgetState =
   | "idle"
   | "needsInfo"
   | "ready"
+  | "nav"
+
   | "starting"
   | "running"
 
