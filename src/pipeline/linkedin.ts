@@ -27,6 +27,8 @@ import {
   checkCompanyList,
   extractSalary,
   validateJobForApplication,
+  validateJobForApplicationDetailed,
+  type ValidationDetail,
 } from "./job-validator"
 
 import {
@@ -251,6 +253,63 @@ export async function applyToJob(
   return {
     applied: true,
     reason: `Modal opened for "${job.title}" @ "${job.company}"`,
+  }
+}
+
+/* ── Job screening: evaluate without applying ── */
+
+/**
+ * Screen a job against all user filter criteria WITHOUT applying.
+ *
+ * Reads the job description (clicks card, waits for detail panel),
+ * runs all filter checks, and returns `readyToApply: boolean` with
+ * a human-readable reason.
+ *
+ * Use this BEFORE calling `applyToJob()` to gate on whether the job
+ * should be applied to at all.
+ */
+export interface ScreenResult {
+  readyToApply: boolean
+  reason: string
+}
+
+export async function screenJob(
+  job: JobPreview,
+  description: string,
+  filters: FilterSettings
+): Promise<ScreenResult> {
+  // Validate against ALL filter criteria (detailed)
+  const detail = validateJobForApplicationDetailed(
+    job.company,
+    job.title,
+    description,
+    filters
+  )
+
+  if (!detail.passes) {
+    return {
+      readyToApply: false,
+      reason: `did not match filters: ${detail.failedFilters.join(", ")}`,
+    }
+  }
+
+  // Check salary filter
+  if (filters.salary) {
+    const minSalary = parseFloat(filters.salary.replace(/[^0-9.]/g, ""))
+    if (!isNaN(minSalary) && minSalary > 0) {
+      const jobSalary = extractSalary(description)
+      if (jobSalary > 0 && jobSalary < minSalary) {
+        return {
+          readyToApply: false,
+          reason: `did not match filters: salary ($${jobSalary} < $${minSalary})`,
+        }
+      }
+    }
+  }
+
+  return {
+    readyToApply: true,
+    reason: "passed all filters",
   }
 }
 
@@ -1719,6 +1778,19 @@ export async function runLinkedInPipeline(
         }
         continue
       }
+
+      // Screen job: check ALL filters -> readyToApply boolean
+      const screen = await screenJob(job, description, site.filters)
+      if (!screen.readyToApply) {
+        console.log(`[SOS] LinkedIn: ❌ readyToApply: false — "${job.title}" @ "${job.company}" — ${screen.reason}`)
+        // Scroll to next job before continuing
+        const nextJob = filteredPreviews[jobIdx + 1]
+        if (nextJob?.element) {
+          await scrollToNextJob(nextJob.element, signal)
+        }
+        continue
+      }
+      console.log(`[SOS] LinkedIn: ✅ readyToApply: true — "${job.title}" @ "${job.company}" — ${screen.reason}`)
 
       // Apply to job (validate + Easy Apply)
       onProgress?.(`Applying to: "${job.title}" @ "${job.company}"...`)

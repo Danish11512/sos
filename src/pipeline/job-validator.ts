@@ -169,7 +169,7 @@ export function extractSalary(description: string): number {
   return maxSalary
 }
 
-/* ---- Composer ---- */
+/* ---- Composer: boolean only (legacy) ---- */
 
 export function validateJobForApplication(
   company: string,
@@ -184,4 +184,38 @@ export function validateJobForApplication(
     checkSecurityClearance(description, filters.securityClearance) &&
     checkExperienceRequirement(description, filters.currentExperience, filters.didMasters)
   )
+}
+
+/* ---- Composer: detailed (returns failed filter names) ---- */
+
+export interface ValidationDetail {
+  passes: boolean
+  failedFilters: string[]
+}
+
+export function validateJobForApplicationDetailed(
+  company: string,
+  title: string,
+  description: string,
+  filters: FilterSettings
+): ValidationDetail {
+  const failed: string[] = []
+
+  if (!checkCompanyBadWords(company, filters.aboutCompanyBadWords, filters.aboutCompanyGoodWords)) {
+    failed.push("companyBadWords")
+  }
+  if (!checkTitleBadWords(title, filters.badWords)) {
+    failed.push("titleBadWords")
+  }
+  if (!checkDescriptionBadWords(description, filters.badWords)) {
+    failed.push("descriptionBadWords")
+  }
+  if (!checkSecurityClearance(description, filters.securityClearance)) {
+    failed.push("securityClearance")
+  }
+  if (!checkExperienceRequirement(description, filters.currentExperience, filters.didMasters)) {
+    failed.push("experienceRequirement")
+  }
+
+  return { passes: failed.length === 0, failedFilters: failed }
 }
