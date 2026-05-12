@@ -14,17 +14,21 @@
 
 import type { JobPreview } from "./types"
 import {
-  dispatchEscapeKey,
-  randomDelay,
-  waitForCondition,
-  waitForElement,
-} from "../utils/dom"
-import {
   DETAIL_PANEL_SELECTOR,
+  DETAIL_PANEL_OVERLAY_SELECTOR,
+  DETAIL_PANEL_CLOSE_SELECTOR,
   LEARN_MORE_BUTTON_SELECTOR,
   MODAL_CLOSE_BUTTON_SELECTOR,
   STARTUP_RESULT_SELECTOR,
 } from "./wellfound-constants"
+import {
+  delay,
+  dispatchEscapeKey,
+  randomDelay,
+  scrollAndClick,
+  waitForCondition,
+  waitForElement,
+} from "../utils/dom"
 
 /* ── Pipeline ── */
 
@@ -164,6 +168,109 @@ export async function openWellfoundJobDetails(
   )
   return modal
 }
+
+
+/* ── Detail panel close ── */
+
+/**
+ * Close the Wellfound detail panel (slide-in DiscoverModal) by trying up to 3 strategies.
+ *
+ * Strategies (in order):
+ *   1) Click the backdrop/overlay outside the panel (the DiscoverModal is relative
+ *      positioned, so there is typically an overlay sibling/parent that receives clicks)
+ *   2) Dispatch an Escape key event on the document
+ *   3) Click a close/dismiss button if present inside the panel
+ *
+ * After each strategy attempt, waits for the modal to be removed from the DOM
+ * using `waitForCondition`. Returns `true` as soon as one strategy succeeds.
+ *
+ * @param detailPanel - The `div[data-test="DiscoverModal"]` element to close
+ * @param signal      - Optional AbortSignal for cancellation
+ * @returns `true` if the panel was successfully closed, `false` if all strategies failed
+ */
+export async function closeWellfoundDetailPanel(
+  detailPanel: Element,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  /* ── Fast path: already closed ── */
+  if (!document.querySelector(DETAIL_PANEL_SELECTOR)) {
+    console.log("[SOS] [Wellfound] Detail panel already closed — skipping close")
+    return true
+  }
+
+  /* ── Helper: wait for modal to disappear ── */
+  async function waitForClose(timeoutMs = 2_000): Promise<boolean> {
+    try {
+      await waitForCondition(
+        () => !document.querySelector(DETAIL_PANEL_SELECTOR),
+        { timeoutMs, signal },
+      )
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /* ── Strategy 1: Click the backdrop/overlay outside the panel ── */
+  // The DiscoverModal is relative positioned; an overlay sibling or parent
+  // usually intercepts clicks outside the modal content area.
+  const overlay = detailPanel.parentElement?.querySelector<HTMLElement>(
+    DETAIL_PANEL_OVERLAY_SELECTOR,
+  )
+  if (overlay) {
+    console.log("[SOS] [Wellfound] Clicking backdrop/overlay to close detail panel (strategy 1)")
+    await scrollAndClick(overlay, signal)
+    if (await waitForClose()) {
+      console.log("[SOS] [Wellfound] Detail panel closed via backdrop click")
+      const onListingPage = !!document.querySelector(STARTUP_RESULT_SELECTOR)
+      if (onListingPage) {
+        console.log("[SOS] [Wellfound] Confirmed back on jobs listing page")
+        await delay(500, signal)
+        return true
+      }
+    }
+  } else {
+    console.log("[SOS] [Wellfound] No backdrop/overlay found for strategy 1")
+  }
+
+  /* ── Strategy 2: Press Escape key ── */
+  dispatchEscapeKey()
+  console.log("[SOS] [Wellfound] Dispatched Escape key to dismiss detail panel (strategy 2)")
+  if (await waitForClose()) {
+    console.log("[SOS] [Wellfound] Detail panel closed via Escape key")
+    const onListingPage = !!document.querySelector(STARTUP_RESULT_SELECTOR)
+    if (onListingPage) {
+      console.log("[SOS] [Wellfound] Confirmed back on jobs listing page")
+      await delay(500, signal)
+      return true
+    }
+  }
+
+  /* ── Strategy 3: Click a close/dismiss button if present ── */
+  const closeBtn = detailPanel.querySelector<HTMLElement>(
+    DETAIL_PANEL_CLOSE_SELECTOR,
+  )
+  if (closeBtn) {
+    console.log("[SOS] [Wellfound] Clicking close/dismiss button in detail panel (strategy 3)")
+    await scrollAndClick(closeBtn, signal)
+    if (await waitForClose()) {
+      console.log("[SOS] [Wellfound] Detail panel closed via close button")
+      const onListingPage = !!document.querySelector(STARTUP_RESULT_SELECTOR)
+      if (onListingPage) {
+        console.log("[SOS] [Wellfound] Confirmed back on jobs listing page")
+        await delay(500, signal)
+        return true
+      }
+    }
+  } else {
+    console.log("[SOS] [Wellfound] No close/dismiss button found in detail panel (strategy 3)")
+  }
+
+  /* ── All strategies exhausted ── */
+  console.log("[SOS] [Wellfound] Failed to close detail panel — all strategies exhausted")
+  return false
+}
+
 
 
 /* ── Job preview reader ── */

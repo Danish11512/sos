@@ -164,6 +164,34 @@ export const FORM_INPUT_SELECTOR =
  *  Same as DETAIL_APPLY_BUTTON_SELECTOR — the "Apply" button submits the form. */
 export const SUBMIT_BUTTON_SELECTOR = DETAIL_APPLY_BUTTON_SELECTOR
 
+/* ── Detail panel close ── */
+
+/** Selector for the backdrop/overlay element outside the detail panel.
+ *  The DiscoverModal is relative positioned; clicking the overlay dismisses it. */
+export const DETAIL_PANEL_OVERLAY_SELECTOR =
+  /* Primary: CSS-module overlay/backdrop classes */
+  `div[class*="overlay" i], ` +
+  `div[class*="backdrop" i], ` +
+  /* Fallback: presentation role or data-test attribute */
+  `div[role="presentation"], ` +
+  `div[data-test="Overlay"], ` +
+  `[class*="Overlay"]`
+
+/** Selector for the close/dismiss button inside the detail panel. */
+export const DETAIL_PANEL_CLOSE_SELECTOR =
+  /* Primary: aria-label based close/dismiss */
+  `button[aria-label*="close" i], ` +
+  `button[aria-label*="dismiss" i], ` +
+  /* Fallback: class-based close/dismiss */
+  `button[class*="close" i], ` +
+  `button[class*="dismiss" i], ` +
+  /* Fallback: data-test attribute */
+  `[data-test*="close" i], ` +
+  `[data-test*="dismiss" i], ` +
+  `[data-test="CloseButton"], ` +
+  /* Broad fallback: X-style button */
+  `button[class*="x"]`
+
 /* ── Login detection ── */
 
 /** Selector for the user avatar/profile element indicating logged-in state.
