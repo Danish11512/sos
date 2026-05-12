@@ -1,9 +1,13 @@
 /**
- * Wellfound pipeline — Phase 2 placeholder.
+ * Wellfound pipeline — Phase 3 (iteration + detail panel open/close).
  *
  * This phase reads all job previews from the page using
- * `readAllWellfoundPreviews()` and logs them. Phase 3 will add
- * clicking/navigation logic.
+ * `readAllWellfoundPreviews()`, then iterates through each job:
+ *   - Opens the detail panel (WF-6)
+ *   - Logs apply type (native vs external based on `hasWellfoundBadge`)
+ *   - Closes the detail panel (WF-7)
+ *
+ * Phase 4 will add the actual apply flow.
  *
  * Usage (from content.ts):
  *   await runWellfoundPipeline(abortController.signal, (msg) => {
@@ -14,14 +18,6 @@
 
 import type { JobPreview } from "./types"
 import {
-  DETAIL_PANEL_SELECTOR,
-  DETAIL_PANEL_OVERLAY_SELECTOR,
-  DETAIL_PANEL_CLOSE_SELECTOR,
-  LEARN_MORE_BUTTON_SELECTOR,
-  MODAL_CLOSE_BUTTON_SELECTOR,
-  STARTUP_RESULT_SELECTOR,
-} from "./wellfound-constants"
-import {
   delay,
   dispatchEscapeKey,
   randomDelay,
@@ -29,14 +25,31 @@ import {
   waitForCondition,
   waitForElement,
 } from "../utils/dom"
+import {
+  DETAIL_PANEL_CLOSE_SELECTOR,
+  DETAIL_PANEL_OVERLAY_SELECTOR,
+  DETAIL_PANEL_SELECTOR,
+  LEARN_MORE_BUTTON_SELECTOR,
+  MODAL_CLOSE_BUTTON_SELECTOR,
+  STARTUP_RESULT_SELECTOR,
+} from "./wellfound-constants"
 
 /* ── Pipeline ── */
 
 /**
- * Run the full Wellfound pipeline (Phase 2 placeholder).
+ * Run the full Wellfound pipeline (Phase 3).
  *
- * Uses `readAllWellfoundPreviews()` to scan the page for job listings, then
- * logs each discovered job. Phase 3 will add clicking/navigation logic.
+ * Iterates through each job preview:
+ * 1. Reports progress via callback
+ * 2. Opens the job detail panel (WF-6)
+ * 3. Logs the detail panel open
+ * 4. Checks native-apply badge from the preview
+ * 5. Logs apply type (native vs external)
+ * 6. Adds a visual feedback delay
+ * 7. Closes the detail panel (WF-7)
+ * 8. Logs panel closed
+ *
+ * Phase 4 will add the actual apply flow.
  *
  * @param signal    - AbortSignal for cancellation
  * @param onProgress - Optional progress callback (used by widget.setProgress)
@@ -59,18 +72,67 @@ export async function runWellfoundPipeline(
     return
   }
 
-  console.log(`[SOS] [Wellfound] Found ${jobs.length} jobs:`)
+  console.log(`[SOS] [Wellfound] Found ${jobs.length} jobs`)
   onProgress?.(`Found ${jobs.length} job(s)`)
 
-  jobs.forEach((job, index) => {
-    console.log(
-      `[SOS] [Wellfound]   ${index + 1}. ${job.title} @ ${job.company} | ${job.compensation}`,
-    )
-  })
+  /* ── Phase 3: Iterate through each job ── */
+  const total = jobs.length
 
-  /* ── Phase 2 placeholder done ── */
+  for (let i = 0; i < total; i++) {
+    signal.throwIfAborted()
+
+    const job = jobs[i]
+    const indexStr = `${i + 1}/${total}`
+
+    /* Step 1: Progress callback with job title */
+    onProgress?.(`[${indexStr}] ${job.title} @ ${job.company}`)
+
+    /* Step 2: Open the job detail panel (WF-6) */
+    const modal = await openWellfoundJobDetails(job, signal)
+
+    /* Step 3: Log detail panel opened */
+    if (modal) {
+      console.log(
+        `[SOS] [Wellfound] [${indexStr}] Detail panel opened for ${job.title} @ ${job.company}`,
+      )
+    } else {
+      console.warn(
+        `[SOS] [Wellfound] [${indexStr}] Detail panel failed to open for ${job.title} @ ${job.company} — skipping`,
+      )
+      continue
+    }
+
+    signal.throwIfAborted()
+
+    /* Step 4 & 5: Check native-apply badge and log apply type */
+    const applyType = job.hasWellfoundBadge ? "native" : "external"
+    console.log(
+      `[SOS] [Wellfound] [${indexStr}] Apply type: ${applyType}`,
+    )
+
+    /* Step 6: Visual feedback delay */
+    await randomDelay(1000, 2000, signal)
+
+    signal.throwIfAborted()
+
+    /* Step 7: Close the detail panel (WF-7) */
+    const closed = await closeWellfoundDetailPanel(modal, signal)
+
+    /* Step 8: Log panel closed */
+    if (closed) {
+      console.log(
+        `[SOS] [Wellfound] [${indexStr}] Detail panel closed for ${job.title} @ ${job.company}`,
+      )
+    } else {
+      console.warn(
+        `[SOS] [Wellfound] [${indexStr}] Detail panel may not have closed cleanly for ${job.title} @ ${job.company}`,
+      )
+    }
+  }
+
+  /* ── Phase 3 done ── */
   signal.throwIfAborted()
-  console.log("[SOS] [Wellfound] ✅ Pipeline complete (Phase 2 — Phase 3 will add clicking/navigation)")
+  console.log("[SOS] [Wellfound] ✅ Pipeline complete (Phase 3 — Phase 4 will add the actual apply flow)")
   onProgress?.("Pipeline complete")
 }
 
@@ -170,7 +232,7 @@ export async function openWellfoundJobDetails(
 }
 
 
-/* ── Detail panel close ── */
+/* ── Detail panel close (WF-7) ── */
 
 /**
  * Close the Wellfound detail panel (slide-in DiscoverModal) by trying up to 3 strategies.
@@ -183,6 +245,8 @@ export async function openWellfoundJobDetails(
  *
  * After each strategy attempt, waits for the modal to be removed from the DOM
  * using `waitForCondition`. Returns `true` as soon as one strategy succeeds.
+ * Also confirms we're back on the jobs listing page by checking for
+ * `STARTUP_RESULT_SELECTOR` in the DOM.
  *
  * @param detailPanel - The `div[data-test="DiscoverModal"]` element to close
  * @param signal      - Optional AbortSignal for cancellation
@@ -270,7 +334,6 @@ export async function closeWellfoundDetailPanel(
   console.log("[SOS] [Wellfound] Failed to close detail panel — all strategies exhausted")
   return false
 }
-
 
 
 /* ── Job preview reader ── */
