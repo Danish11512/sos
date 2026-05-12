@@ -31,22 +31,20 @@ export const LINKEDIN_RESULTS_SELECTOR =
   "ul.jobs-search-results__list, " +
   "div.scaffold-layout__list"
 
-/** Selector for job card elements.
- *  Supports both old LinkedIn (anchor-based) and new CSS-module design (div[role='button']).
- *  New design: div[role='button'][tabindex='0'] with componentkey attributes.
- *  Old design: anchor elements with job-card-list__title, etc.
- */
 /**
  * Selector for job card elements.
- * NEW LinkedIn CSS-module design uses div[role='button'] cards WITHIN the results list.
- * OLD LinkedIn design uses anchor elements. Critical: every selector must scoped to
+ * Current LinkedIn CSS-module design (May 2026): div[role='button'][tabindex='0'] cards
+ * within a lazy-column container div[data-testid='lazy-column'][data-component-type='LazyColumn'].
+ * OLD LinkedIn design uses anchor elements. Critical: every selector must be scoped to
  * the results-list container so filter buttons / dropdowns are NOT matched.
  *
- * The key insight: real job cards are children of the jobs-search-results list,
+ * The key insight: real job cards are children of the lazy-column container,
  * whereas filter buttons live in the filter-bar above the list.
  */
 export const CARD_SELECTOR =
-  /* New LinkedIn CSS-module design: div[role='button'] INSIDE the results list */
+  /* Current LinkedIn CSS-module design (2026): div[role='button'] INSIDE lazy column */
+  "div[data-testid='lazy-column'][data-component-type='LazyColumn'] div[role='button'][tabindex='0'], " +
+  /* Legacy new design: div[role='button'] inside results list */
   ".jobs-search-results-list div[role='button'][tabindex='0'], " +
   ".jobs-search-results__list div[role='button'], " +
   "div.scaffold-layout__list div[role='button'][tabindex='0'], " +
@@ -56,8 +54,13 @@ export const CARD_SELECTOR =
   "li.jobs-search-results__list-item a[href*='/jobs/view'], " +
   "a[href*='/jobs/view']"
 
-/** Selector for the job detail panel. */
+/** Selector for the job detail panel.
+ *  Current LinkedIn CSS-module design (May 2026): div[data-testid='lazy-column'] that is NOT a LazyColumn.
+ *  OLD design used .jobs-search__job-details, etc. */
 export const DETAIL_PANEL_SELECTOR =
+  /* Current design: lazy-column without LazyColumn component type */
+  "div[data-testid='lazy-column']:not([data-component-type='LazyColumn']), " +
+  /* Legacy designs */
   ".jobs-search__job-details, " +
   "div.jobs-details, " +
   ".job-view-layout, " +
@@ -207,23 +210,44 @@ export const NEW_DETAIL_COLUMN_SELECTOR =
   ".jobs-search__job-details, " +
   "div.scaffold-layout__detail"
 
-/** Selector for job title text in new design cards (screen-reader span). */
+/** Selector for job title text in new design cards.
+ *  Current LinkedIn CSS-module design (May 2026): the title <p> contains both a
+ *  <span class='e94a47cd'> (screen-reader text) and a <span aria-hidden='true'> (visual text).
+ *  We target the aria-hidden span that is a sibling of the .e94a47cd span within the card. */
 export const NEW_CARD_TITLE_SELECTOR =
+  /* Current design: p containing both screen-reader span and visual aria-hidden span */
+  "p:has(> span.e94a47cd) span[aria-hidden='true'], " +
+  /* Legacy new design: broad aria-hidden span */
   "span[aria-hidden='true'], " +
   "a.job-card-list__title, " +
   "span.job-card-container__primary-description"
 
-/** Selector for job title visual text in new design cards (aria-hidden span). */
-export const NEW_CARD_TITLE_VISUAL_SELECTOR = "span[aria-hidden='true']"
+/** Selector for job title visual text in new design cards (aria-hidden span).
+ *  Current LinkedIn CSS-module design: the visual title is a span[aria-hidden='true']
+ *  inside a <p> that also contains a span.e94a47cd for screen-reader text. */
+export const NEW_CARD_TITLE_VISUAL_SELECTOR =
+  "p:has(> span.e94a47cd) span[aria-hidden='true'], " +
+  "span[aria-hidden='true']"
 
-/** Selector for company name in new design cards. */
+/** Selector for company name in new design cards.
+ *  Current LinkedIn CSS-module design (May 2026): company name is in
+ *  a p with hashed classes inside a div._6142bcff. */
 export const NEW_CARD_COMPANY_SELECTOR =
+  /* Current design: p inside div with hashed class */
+  "div._6142bcff p, " +
+  "p._384a5d29._7c35b94f._00e11fba.ddae5c29, " +
+  /* Legacy designs */
   "span.job-card-container__primary-description, " +
   "span[data-testid='company-name'], " +
   "a.job-card-container__company-name"
 
-/** Selector for location in new design cards. */
+/** Selector for location in new design cards.
+ *  Current LinkedIn CSS-module design (May 2026): location is in
+ *  a p with hashed classes _384a5d29 _7c35b94f _6142bcff e0d2ec4d ddae5c29. */
 export const NEW_CARD_LOCATION_SELECTOR =
+  /* Current design: p with hashed classes */
+  "p._384a5d29._7c35b94f._6142bcff.e0d2ec4d.ddae5c29, " +
+  /* Legacy designs */
   "li.job-card-container__metadata-item, " +
   "span.job-card-container__metadata-item"
 
@@ -243,41 +267,69 @@ export const NEW_PAGINATION_SELECTOR =
   "div[data-testid^='pagination-indicator-'], " +
   "div.jobs-search-results-list__pagination"
 
+/** Selector for the search results type filter bar (Jobs, Posts, Courses, People toggles).
+ *  Current LinkedIn CSS-module design: div[role='button'][tabindex='0'] with checkbox-style toggles.
+ *  Old design used a[role='radio'] links. */
+export const SEARCH_RESULTS_FILTER_BAR =
+  /* Current design: div[role='button'] toggles with aria-label containing filter type */
+  "div[role='button'][tabindex='0']:has(div[aria-label*='Filter by']), " +
+  /* Legacy designs */
+  "a[role='radio'][aria-label*='Filter by'], " +
+  "a[role='radio']"
+
 /* ── Filter dropdown button selectors (top of search results) ── */
 
-/** Filter dropdown button: Date Posted. */
+/** Filter dropdown button: Date Posted.
+ *  Current LinkedIn CSS-module design: div[role='button'] with inner div[aria-label*='Filter by Date posted']. */
 export const FILTER_BTN_DATE_POSTED =
+  /* Current design: div[role='button'] with inner aria-label div */
+  "div[role='button']:has(div[aria-label*='Filter by Date posted']), " +
+  /* Legacy designs */
   "button[aria-label*='Date posted filter'], " +
   "button[aria-label*='date posted']"
 
-/** Filter dropdown button: Experience Level. */
+/** Filter dropdown button: Experience Level.
+ *  Current LinkedIn CSS-module design: div[role='button'] with inner div[aria-label*='Filter by Experience level']. */
 export const FILTER_BTN_EXPERIENCE =
+  "div[role='button']:has(div[aria-label*='Filter by Experience level']), " +
   "button[aria-label*='Experience Level filter'], " +
   "button[aria-label*='experience level']"
 
-/** Filter dropdown button: Job Type. */
+/** Filter dropdown button: Job Type.
+ *  Current LinkedIn CSS-module design: div[role='button'] with inner div[aria-label*='Filter by Employment type']. */
 export const FILTER_BTN_JOB_TYPE =
+  "div[role='button']:has(div[aria-label*='Filter by Employment type']), " +
   "button[aria-label*='Job type filter'], " +
   "button[aria-label*='job type']"
 
-/** Filter dropdown button: On-site/Remote. */
+/** Filter dropdown button: On-site/Remote.
+ *  Current LinkedIn CSS-module design: div[role='button'] with inner div[aria-label*='Filter by Remote']. */
 export const FILTER_BTN_ON_SITE =
+  "div[role='button']:has(div[aria-label*='Filter by Remote']), " +
   "button[aria-label*='On-site/Remote filter'], " +
   "button[aria-label*='on-site/remote']"
 
-/** Filter toggle button: Easy Apply only. */
+/** Filter toggle button: Easy Apply only.
+ *  Current LinkedIn CSS-module design: div[role='button'] with inner div[aria-label*='Filter by Easy Apply']. */
 export const FILTER_BTN_EASY_APPLY =
+  "div[role='button']:has(div[aria-label*='Filter by Easy Apply']), " +
   "button[aria-label*='Easy Apply filter'], " +
   "button[aria-label*='easy apply']"
 
-/** Filter dropdown button: Sort by. */
+/** Filter dropdown button: Sort by.
+ *  Current LinkedIn CSS-module design: div[role='button'] with inner div[aria-label*='Sort by']. */
 export const FILTER_BTN_SORT =
+  "div[role='button']:has(div[aria-label*='Sort by']), " +
   "button[aria-label*='Sort by'], " +
   "button[aria-label*='sort by']"
 
 
-/** Generic filter button selector (any filter dropdown at top of results). */
+/** Generic filter button selector (any filter dropdown at top of results).
+ *  Current LinkedIn CSS-module design: div[role='button'] filter buttons with inner aria-label divs. */
 export const FILTER_BUTTONS =
+  /* Current design: div[role='button'] with filter-related inner aria-label */
+  "div[role='button']:has(div[aria-label*='Filter by']), " +
+  /* Legacy designs */
   "button.jobs-search-results-list__filter-button, " +
   "button[aria-label*='filter'], " +
   "button[aria-label*='Filter']"

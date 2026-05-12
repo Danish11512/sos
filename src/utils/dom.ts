@@ -374,10 +374,18 @@ export async function waitForTextContent(
 }
 
 /** Get all visible text content from an element (strips hidden children).
- *  FIX F40: Only strip elements with CSS display:none or visibility:hidden, not aria-hidden. */
+ *  FIX F40: Only strip elements with CSS display:none or visibility:hidden, not aria-hidden.
+ *  Removed .visually-hidden from the selector — LinkedIn uses that class for its screen-reader
+ *  text which we WANT to preserve. Also added visibility:hidden checks. */
 export function getVisibleText(el: Element): string {
   const clone = el.cloneNode(true) as Element
-  for (const hidden of clone.querySelectorAll(".visually-hidden, [hidden], [style*='display: none'], [style*='display:none']")) {
+  for (const hidden of clone.querySelectorAll(
+    "[hidden], " +
+    "[style*='display: none'], " +
+    "[style*='display:none'], " +
+    "[style*='visibility: hidden'], " +
+    "[style*='visibility:hidden']"
+  )) {
     hidden.remove()
   }
   return (clone.textContent || "").trim()

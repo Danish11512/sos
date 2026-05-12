@@ -89,6 +89,7 @@ import {
   NEW_CARD_LOCATION_SELECTOR,
   NEW_LIST_COLUMN_SELECTOR,
   NEW_DETAIL_COLUMN_SELECTOR,
+  SEARCH_RESULTS_FILTER_BAR,
 } from "./linkedin-constants"
 
 import { fillEasyApplyModal, clickEasyApplyButton, closeEasyApplyModal } from "./easy-apply-modal"
@@ -340,23 +341,31 @@ async function searchViaGlobalBar(
   // Wait for the typeahead dropdown to appear with the "Jobs" filter option
   await delay(800, signal)
 
-  // Find and click the "Jobs" radio button in the typeahead dropdown
+  // Find and click the "Jobs" filter button in the typeahead dropdown
   // This navigates to the jobs search results page with the keywords
-  // First try: direct aria-label match
+  // Current LinkedIn CSS-module design: div[role='button'][tabindex='0'] with checkbox-style toggles
+  // Old design: a[role='radio'] links
   let jobsBtn = document.querySelector<HTMLElement>(
-    "a[role='radio'][aria-label*='Jobs'], " +
-    "a[role='radio'][aria-label*='Filter by Jobs']"
+    /* Current design: div[role='button'] with aria-label containing 'Jobs' */
+    "div[role='button'][tabindex='0']:has(div[aria-label*='Filter by Jobs']), " +
+    "div[role='button'][tabindex='0']:has(div[aria-label*='Jobs']), " +
+    /* Legacy designs */
+    "a[role='radio'][aria-label*='Filter by Jobs'], " +
+    "a[role='radio'][aria-label*='Jobs']"
   )
 
-  // Second try: search by text content among all radio buttons in the typeahead
+  // Second try: search by text content among all radio buttons or div toggles in the typeahead
   if (!jobsBtn) {
-    jobsBtn = Array.from(document.querySelectorAll<HTMLElement>("a[role='radio']")).find(
+    jobsBtn = Array.from(document.querySelectorAll<HTMLElement>(
+      "a[role='radio'], " +
+      "div[role='button'][tabindex='0']"
+    )).find(
       (el) => el.textContent?.trim().toLowerCase() === "jobs" ||
               el.getAttribute("aria-label")?.toLowerCase().includes("jobs")
     ) || null
   }
 
-  // Third try: look for any anchor with role='radio' inside the typeahead dropdown
+  // Third try: look for any filter button inside the typeahead dropdown
   if (!jobsBtn) {
     const typeaheadDropdown = document.querySelector(
       "[data-test-typeahead], " +
@@ -365,6 +374,7 @@ async function searchViaGlobalBar(
     )
     if (typeaheadDropdown) {
       jobsBtn = typeaheadDropdown.querySelector<HTMLElement>(
+        "div[role='button'][tabindex='0'], " +
         "a[role='radio'], " +
         "a[aria-label*='Jobs']"
       )
@@ -1035,18 +1045,24 @@ async function applyDomFilters(
 /* ── Batch job card reading ── */
 
 /** Extract title from a LinkedIn job card. Returns clean text without extra characters.
- *  Supports both old LinkedIn (anchor-based) and new CSS-module design (div[role='button']). */
+ *  Supports both old LinkedIn (anchor-based) and new CSS-module design (div[role='button']).
+ *  Current LinkedIn CSS-module design (May 2026): title is in a <p> containing both a
+ *  <span class='e94a47cd'> (screen-reader text) and a <span aria-hidden='true'> (visual text).
+ *  We prefer the visual text (aria-hidden) to avoid screen-reader prefix noise. */
 function extractCardTitle(card: HTMLElement): string {
-  // New LinkedIn CSS-module design: screen-reader span with job title
+  // Current LinkedIn CSS-module design: visual span with aria-hidden inside a p with span.e94a47cd sibling
+  // This is more specific than the broad span[aria-hidden='true'] selector
+  const visualTitle = card.querySelector<HTMLElement>(
+    "p:has(> span.e94a47cd) span[aria-hidden='true']"
+  )
+  if (visualTitle?.textContent?.trim()) {
+    return visualTitle.textContent.trim().replace(/\s+/g, " ")
+  }
+
+  // Fallback: use the general NEW_CARD_TITLE_SELECTOR (supports both old and new designs)
   const srTitle = card.querySelector<HTMLElement>(NEW_CARD_TITLE_SELECTOR)
   if (srTitle?.textContent?.trim()) {
     return srTitle.textContent.trim().replace(/\s+/g, " ")
-  }
-
-  // New LinkedIn CSS-module design: visual span with aria-hidden
-  const visualTitle = card.querySelector<HTMLElement>(NEW_CARD_TITLE_VISUAL_SELECTOR)
-  if (visualTitle?.textContent?.trim()) {
-    return visualTitle.textContent.trim().replace(/\s+/g, " ")
   }
 
   // Old LinkedIn design: job card title link
@@ -1167,6 +1183,29 @@ async function waitForJobCards(timeoutMs = 15_000, signal?: AbortSignal): Promis
       resolve(cards.length > 0 ? Array.from(cards) : null)
     }, timeoutMs)
   })
+}
+
+/**
+ * Wait for the search results page to finish loading by checking for the
+ * search results filter bar (Jobs, Posts, Courses toggles) and job cards.
+ * Current LinkedIn CSS-module design: div[role='button'][tabindex='0'] with
+ * checkbox-style toggles. Old design used a[role='radio'] links.
+ */
+async function waitForSearchResultsPageReady(timeoutMs = 15_000, signal?: AbortSignal): Promise<boolean> {
+  try {
+    // Wait for either the search results filter bar OR job cards to appear
+    await waitForCondition(
+      () => {
+        const filterBar = document.querySelector(SEARCH_RESULTS_FILTER_BAR)
+        const cards = document.querySelectorAll(CARD_SELECTOR)
+        return (filterBar !== null) || (cards.length > 0)
+      },
+      { timeoutMs, signal, pollIntervalMs: 200 }
+    )
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**
