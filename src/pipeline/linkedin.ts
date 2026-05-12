@@ -281,18 +281,24 @@ function typeIntoInput(input: HTMLInputElement | HTMLTextAreaElement, value: str
 /**
  * Submit a search by dispatching Enter key and also trying form submit.
  * Some SPA frameworks need the form submit event in addition to keyboard events.
+ *
+ * On current LinkedIn (May 2026), the global search bar typeahead intercepts the
+ * Enter key for its own functionality — pressing Enter no longer triggers navigation.
+ * This function now also attempts to click a typeahead suggestion item as a fallback.
+ *
+ * @returns true if the search successfully navigated to the jobs search page
  */
-function submitSearch(input: Element): void {
-  // Dispatch Enter key events
+async function submitSearch(input: Element, signal?: AbortSignal): Promise<boolean> {
+  // 1. Dispatch Enter key events (may work on some LinkedIn layouts)
   dispatchEnterKey(input)
 
-  // Also try to submit the parent form if it exists
+  // 2. Also try to submit the parent form if it exists
   const form = input.closest("form")
   if (form) {
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))
   }
 
-  // Try clicking any visible search/submit button near the input
+  // 3. Try clicking any visible search/submit button near the input
   const container = input.closest("div, nav, header, form")
   if (container) {
     const searchBtn = container.querySelector<HTMLElement>(
@@ -305,6 +311,65 @@ function submitSearch(input: Element): void {
       searchBtn.click()
     }
   }
+
+  // 4. If we're ALREADY on a jobs page (semantic/jobs search bars), Enter key behavior
+  //    still works — no need for the typeahead fallback. Just return false and let the
+  //    caller (searchViaSemanticBar / searchViaJobsBar) handle result waiting.
+  const isAlreadyOnJobsPage = window.location.href.includes("/jobs/")
+  if (isAlreadyOnJobsPage) {
+    return false
+  }
+
+  // 5. Wait briefly and check if Enter + form submit navigated us to /jobs/
+  try {
+    await delay(1500, signal)
+    if (window.location.href.includes("/jobs/")) {
+      return true
+    }
+  } catch {
+    return false
+  }
+
+  // 6. Enter didn't work — try clicking a typeahead suggestion item.
+  //    LinkedIn's global search bar typeahead requires clicking one of the suggestion
+  //    items (like the 'Jobs' filter button) to navigate to search results.
+  try {
+    const typeahead = document.querySelector(
+      "[data-test-typeahead], " +
+      ".search-global-typeahead__typeahead, " +
+      "div[role='listbox']"
+    )
+    if (typeahead) {
+      const suggestions = typeahead.querySelectorAll<HTMLElement>(
+        "a[role='radio'], " +
+        "div[role='button'][tabindex='0'], " +
+        "a[role='link'], " +
+        "li[role='option']"
+      )
+      for (const suggestion of suggestions) {
+        const text = suggestion.textContent?.trim().toLowerCase() || ""
+        // Look for any suggestion that mentions 'search' or 'jobs'
+        if (text.includes("search") || text.includes("jobs")) {
+          scrollAndClick(suggestion)
+          // Wait for URL to change to /jobs/
+          try {
+            await waitForCondition(
+              () => window.location.href.includes("/jobs/"),
+              { timeoutMs: 5_000, signal, pollIntervalMs: 200 }
+            )
+            return true
+          } catch {
+            // This suggestion didn't trigger navigation — try the next one
+            continue
+          }
+        }
+      }
+    }
+  } catch {
+    // Typeahead suggestion clicking failed — fall through to return false
+  }
+
+  return false
 }
 
 /**
@@ -445,11 +510,24 @@ async function searchViaGlobalBar(
 
     scrollAndClick(jobsBtn)
   } else {
-    console.log("[SOS] LinkedIn: 'Jobs' filter not found in typeahead — submitting search directly")
-    submitSearch(input)
+    console.log("[SOS] LinkedIn: 'Jobs' filter not found in typeahead — attempting fallback search strategies")
+    const submitted = await submitSearch(input, signal)
+
+    if (submitted) {
+      // submitSearch already confirmed URL changed to /jobs/
+      console.log("[SOS] LinkedIn: Fallback search navigated to jobs page")
+      return true
+    }
+
+    // submitSearch confirmed it couldn't navigate — short-circuit the 10s wait
+    // so navigateToSearchTerm proceeds to Strategy 4 (URL navigation) faster
+    console.log("[SOS] LinkedIn: Fallback search did not navigate — trying next strategy")
+    return false
   }
 
   // Wait for URL to change to jobs search results
+  // Note: When jobsBtn was found and clicked (above), execution continues here.
+  // The click may cause a full page refresh, so this wait is still needed for that path.
   try {
     await waitForCondition(
       () => window.location.href.includes("/jobs/"),
@@ -483,7 +561,7 @@ async function searchViaSemanticBar(term: string, signal?: AbortSignal): Promise
   typeIntoInput(input, term)
 
   // Submit the search
-  submitSearch(input)
+  await submitSearch(input, signal)
 
   // Wait for results to appear (cards or empty state)
   try {
@@ -515,7 +593,7 @@ async function searchViaJobsBar(term: string, signal?: AbortSignal): Promise<boo
   typeIntoInput(input, term)
 
   // Submit the search
-  submitSearch(input)
+  await submitSearch(input, signal)
 
   // Wait for results to appear (cards or empty state)
   try {
