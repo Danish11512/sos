@@ -107,7 +107,7 @@ export class SettingsManager {
     const s = site.search
     if (s.searchTerms.length === 0) missing.push({ section: "search", field: "searchTerms", label: "Search Terms (at least 1)" })
     if (emptyStr(s.searchLocation)) missing.push({ section: "search", field: "searchLocation", label: "Search Location" })
-    if (s.switchNumber <= 0 || isNaN(s.switchNumber)) missing.push({ section: "search", field: "switchNumber", label: "Switch #" })
+    if (s.switchNumber < 1 || isNaN(s.switchNumber)) missing.push({ section: "search", field: "switchNumber", label: "Switch #" })
 
     /* Filters */
     if (emptyStr(site.filters.sortBy)) missing.push({ section: "filters", field: "sortBy", label: "Sort By" })
@@ -127,7 +127,7 @@ export class SettingsManager {
     if (salNum <= 0 || isNaN(salNum)) missing.push({ section: "answers", field: "desiredSalary", label: "Desired Salary" })
 
     /* Pipeline & Behavior */
-    if (global.globalBehavior.clickGap <= 0) missing.push({ section: "globalBehavior", field: "clickGap", label: "Click Gap" })
+    if (global.globalBehavior.clickGap < 1) missing.push({ section: "globalBehavior", field: "clickGap", label: "Click Gap" })
 
     /* Additional */
     if (emptyStr(site.additional.resumeFileName)) missing.push({ section: "additional", field: "resumeFileName", label: "Resume Upload" })

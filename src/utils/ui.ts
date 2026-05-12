@@ -156,8 +156,8 @@ export class FloatingWidget {
 
   private async persist(): Promise<void> {
     this.form.gatherIntoSettings()
-    await saveSettings(this.settings)
     settingsManager.setData(this.settings)
+    await saveSettings(this.settings)
     eventBus.emit("settings-changed", { settings: this.settings })
     this.refreshState()
   }

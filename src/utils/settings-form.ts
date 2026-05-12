@@ -140,7 +140,7 @@ export class SettingsForm {
 
     // Tag input
     const site = settings.perSite[siteId]
-    if (site) this.syncTagInput(site.search.searchTerms)
+    this.syncTagInput(site?.search?.searchTerms ?? [])
 
     // Resume filename
     const fnEl = this.container.querySelector(".sos-resume-filename")
