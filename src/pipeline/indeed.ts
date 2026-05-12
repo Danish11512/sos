@@ -64,7 +64,7 @@ export async function applyIndeedExtraFilters(
     return result
   }
 
-  scrollAndClick(filterBtn)
+  await scrollAndClick(filterBtn)
   await delay(1_500)
 
   const filterModal = await waitForElement(
@@ -82,7 +82,7 @@ export async function applyIndeedExtraFilters(
 
   const applyBtn = findButtonByText(filterModal, "show results", "apply")
   if (applyBtn) {
-    scrollAndClick(applyBtn)
+    await scrollAndClick(applyBtn)
     await delay(1_000)
     console.log("[SOS] Indeed: Clicked 'Show results' to apply filters")
   }

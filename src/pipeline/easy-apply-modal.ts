@@ -191,10 +191,10 @@ function answerSelectQuestion(
 /**
  * Answer a radio button question by matching the label to settings.
  */
-function answerRadioQuestion(
+async function answerRadioQuestion(
   question: FormElement,
   ctx: AnswerContext
-): boolean {
+): Promise<boolean> {
   const radio = question.element as HTMLInputElement
   const name = radio.name
   if (!name) return false
@@ -221,7 +221,7 @@ function answerRadioQuestion(
   for (const r of radios) {
     const label = getRadioLabel(r)
     if (label === best) {
-      scrollAndClick(r)
+      await scrollAndClick(r)
       console.log(`[SOS] EasyApply: Selected radio "${best}" for "${question.label}"`)
       return true
     }
@@ -277,15 +277,15 @@ function getRadioLabel(radio: HTMLInputElement): string {
 /**
  * Answer a text input question.
  */
-function answerTextQuestion(
+async function answerTextQuestion(
   question: FormElement,
   ctx: AnswerContext
-): boolean {
+): Promise<boolean> {
   const answer = matchQuestionToAnswer(question.label, ctx)
   if (!answer) return false
 
   const input = question.element as HTMLInputElement
-  setReactInputValue(input, answer)
+  await setReactInputValue(input, answer)
   console.log(`[SOS] EasyApply: Filled text "${answer}" for "${question.label}"`)
   return true
 }
@@ -293,15 +293,15 @@ function answerTextQuestion(
 /**
  * Answer a textarea question.
  */
-function answerTextareaQuestion(
+async function answerTextareaQuestion(
   question: FormElement,
   ctx: AnswerContext
-): boolean {
+): Promise<boolean> {
   const answer = matchQuestionToAnswer(question.label, ctx)
   if (!answer) return false
 
   const textarea = question.element as HTMLTextAreaElement
-  setReactInputValue(textarea, answer)
+  await setReactInputValue(textarea, answer)
   console.log(`[SOS] EasyApply: Filled textarea for "${question.label}"`)
   return true
 }
@@ -309,10 +309,10 @@ function answerTextareaQuestion(
 /**
  * Answer a checkbox question — click if unchecked.
  */
-function answerCheckboxQuestion(question: FormElement): boolean {
+async function answerCheckboxQuestion(question: FormElement): Promise<boolean> {
   const checkbox = question.element as HTMLInputElement
   if (!checkbox.checked) {
-    scrollAndClick(checkbox)
+    await scrollAndClick(checkbox)
     console.log(`[SOS] EasyApply: Checked checkbox for "${question.label}"`)
     return true
   }
@@ -452,7 +452,7 @@ async function clickSubmitApplication(
     return false
   }
 
-  scrollAndClick(submitBtn)
+  await scrollAndClick(submitBtn)
 
   // FIX F60: Use Promise.race to handle both confirmation modal and signal abort
   // The observer uses a LONGER fallback timeout (8s) than the race delay (5s),
@@ -499,7 +499,7 @@ async function clickSubmitApplication(
     // Click "Done" button
     const doneBtn = findButtonByText(confirmModal, "done", "close", "ok", "got it")
     if (doneBtn) {
-      scrollAndClick(doneBtn)
+      await scrollAndClick(doneBtn)
       await delay(500, signal)
     } else {
       // Press Escape to dismiss
@@ -526,7 +526,7 @@ async function clickSubmitApplication(
 /**
  * Toggle the "Follow company" checkbox on the review screen.
  */
-function toggleFollowCompany(modal: Element, follow: boolean): void {
+async function toggleFollowCompany(modal: Element, follow: boolean): Promise<void> {
   if (!follow) return
 
   const followCheckbox = modal.querySelector<HTMLInputElement>(
@@ -536,7 +536,7 @@ function toggleFollowCompany(modal: Element, follow: boolean): void {
   )
 
   if (followCheckbox && !followCheckbox.checked) {
-    scrollAndClick(followCheckbox)
+    await scrollAndClick(followCheckbox)
     console.log("[SOS] EasyApply: Toggled follow company checkbox")
   }
 }
@@ -611,7 +611,7 @@ export async function fillEasyApplyModal(
       // Answer each question
       for (const q of formElements) {
         signal?.throwIfAborted()
-        const answered = answerQuestion(q, ctx)
+        const answered = await answerQuestion(q, ctx)
         if (answered) {
           console.log(`[SOS] EasyApply: Answered "${q.label}" (${q.type})`)
         } else {
@@ -671,7 +671,7 @@ export async function fillEasyApplyModal(
       case "review":
         // On review screen — toggle follow company, then submit
         await delay(POST_NAV_DELAY, signal)
-        toggleFollowCompany(modal, followCompanies)
+        await toggleFollowCompany(modal, followCompanies)
         await delay(500, signal)
 
         // Try to submit
@@ -714,7 +714,7 @@ export async function fillEasyApplyModal(
 /**
  * Answer a single question based on its type.
  */
-function answerQuestion(q: FormElement, ctx: AnswerContext): boolean {
+async function answerQuestion(q: FormElement, ctx: AnswerContext): Promise<boolean> {
   switch (q.type) {
     case "select":
       return answerSelectQuestion(q, ctx)
@@ -744,13 +744,13 @@ async function handleNavigation(
 
   if (text.includes("next") || text.includes("continue")) {
     console.log("[SOS] EasyApply: Clicking Next")
-    scrollAndClick(navBtn.element)
+    await scrollAndClick(navBtn.element)
     return { action: "next" }
   }
 
   if (text.includes("review")) {
     console.log("[SOS] EasyApply: Clicking Review")
-    scrollAndClick(navBtn.element)
+    await scrollAndClick(navBtn.element)
     return { action: "review" }
   }
 
@@ -772,7 +772,7 @@ async function trySubmit(
   followCompanies: boolean,
   signal?: AbortSignal
 ): Promise<boolean> {
-  toggleFollowCompany(modal, followCompanies)
+  await toggleFollowCompany(modal, followCompanies)
   await delay(500, signal)
 
   // Look for Submit button
@@ -842,7 +842,7 @@ async function handleStuck(
         )
         if (radios.length > 0) {
           const randomIdx = Math.floor(Math.random() * radios.length)
-          scrollAndClick(radios[randomIdx])
+          await scrollAndClick(radios[randomIdx])
           console.log(`[SOS] EasyApply: Random radio for "${q.label}"`)
         }
       }
@@ -994,10 +994,10 @@ export async function clickEasyApplyButton(
     }
 
     console.log("[SOS] LinkedIn: Clicking Easy Apply button (text-based fallback)")
-    scrollAndClick(fallbackBtn)
+    await scrollAndClick(fallbackBtn)
   } else {
     console.log("[SOS] LinkedIn: Clicking Easy Apply button")
-    scrollAndClick(applyBtn)
+    await scrollAndClick(applyBtn)
   }
 
   // Wait for modal to appear and be fully loaded
@@ -1040,7 +1040,7 @@ export async function closeEasyApplyModal(): Promise<boolean> {
   )
   if (closeBtn) {
     console.log("[SOS] LinkedIn: Clicking Easy Apply modal close button (strategy 1)")
-    scrollAndClick(closeBtn)
+    await scrollAndClick(closeBtn)
     if (await waitForModalClose(2_000)) return true
   }
 

@@ -85,11 +85,13 @@ export function findElementByText(
   return null
 }
 
-/** Scroll element into view then click. */
-export function scrollAndClick(el: Element): void {
+/** Scroll element into view then click with human-like pause between scroll and click. */
+export async function scrollAndClick(el: Element, signal?: AbortSignal): Promise<void> {
   if (el instanceof HTMLElement) {
     el.scrollIntoView({ behavior: "smooth", block: "center" })
   }
+  // Human-like delay between scroll and click (visual processing time)
+  await randomDelay(300, 900, signal)
   clickElement(el)
 }
 
@@ -123,7 +125,7 @@ export async function toggleCheckboxItems(
       const escaped = item.label.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
       const re = new RegExp(`\\b${escaped}\\b`, "i")
       if (re.test(text)) {
-        scrollAndClick(el)
+        await scrollAndClick(el)
         await delay(clickDelayMs, signal)
         count++
         found = true
@@ -469,34 +471,62 @@ export function pushStateNavigate(url: string | URL): void {
 }
 
 /**
- * Set an input element's value in a way that React/SPA frameworks detect.
+ * Set an input element's value in a way that React/SPA frameworks detect,
+ * simulating human-like character-by-character typing.
+ *
  * Uses the native property setter (not the value property assignment)
- * which bypasses React's synthetic event system.
+ * which bypasses React's synthetic event system. After setting the full
+ * value, dispatches focus, input, change, blur events.
  *
  * FIX F5: After setting value, also dispatch focus, blur, input events.
  */
-export function setReactInputValue(
+export async function setReactInputValue(
   input: HTMLInputElement | HTMLTextAreaElement,
-  value: string
-): void {
+  value: string,
+  signal?: AbortSignal
+): Promise<void> {
   const nativeSetter = Object.getOwnPropertyDescriptor(
     (input.constructor as unknown as { prototype: typeof HTMLInputElement }).prototype,
     "value"
   )?.set
-  nativeSetter?.call(input, value)
 
-  // FIX F5: Dispatch focus, blur, input, change events for React compatibility
-  input.dispatchEvent(new Event("focus", { bubbles: true }))
-  input.dispatchEvent(new Event("input", { bubbles: true }))
-  input.dispatchEvent(new Event("change", { bubbles: true }))
+  // For short values (like search terms), type character-by-character
+  // to simulate human typing. For long values (like cover letters), type
+  // in bursts of 3-5 characters to avoid being too slow.
+  const isShortValue = value.length <= 50
+  const chunkSize = isShortValue ? 1 : Math.floor(Math.random() * 3) + 3
+
+  for (let i = 0; i < value.length; i += chunkSize) {
+    signal?.throwIfAborted()
+    const chunk = value.slice(0, i + Math.min(chunkSize, value.length - i))
+    nativeSetter?.call(input, chunk)
+
+    // Dispatch events for each chunk
+    if (i === 0) {
+      input.dispatchEvent(new Event("focus", { bubbles: true }))
+    }
+    input.dispatchEvent(new Event("input", { bubbles: true }))
+    input.dispatchEvent(new Event("change", { bubbles: true }))
+
+    // Human-like typing speed: 80-250ms per keystroke (or per chunk for long values)
+    if (i + chunkSize < value.length) {
+      const typingDelay = isShortValue
+        ? Math.floor(Math.random() * 170) + 80  // 80-250ms per character
+        : Math.floor(Math.random() * 150) + 50  // 50-200ms per chunk for long text
+      await delay(typingDelay, signal)
+    }
+  }
+
+  // Final blur event
   input.dispatchEvent(new Event("blur", { bubbles: true }))
 }
 
 /**
  * Dispatch keyboard events in a way that maximizes React/SPA compatibility.
  * FIX F6: Dispatch ALL three events (keydown, keypress, keyup).
+ * Now async with human-like jitter between key events to avoid anti-bot detection.
  */
-export function dispatchEnterKey(element: Element): void {
+export async function dispatchEnterKey(element: Element, signal?: AbortSignal): Promise<void> {
   const eventOptions = {
     key: "Enter",
     code: "Enter",
@@ -508,7 +538,10 @@ export function dispatchEnterKey(element: Element): void {
   }
 
   element.dispatchEvent(new KeyboardEvent("keydown", eventOptions))
+  // Human-like jitter between keydown and keyup (40-120ms)
+  await randomDelay(40, 120, signal)
   element.dispatchEvent(new KeyboardEvent("keypress", eventOptions))
+  await randomDelay(40, 120, signal)
   element.dispatchEvent(new KeyboardEvent("keyup", eventOptions))
 }
 
@@ -657,8 +690,9 @@ export async function retryApply<T>(
 /**
  * Handle the "Save draft?" modal that appears when discarding mid-application.
  * Clicks "Discard" to exit cleanly.
+ * Now async because scrollAndClick is async.
  */
-export function discardApplication(): boolean {
+export async function discardApplication(signal?: AbortSignal): Promise<boolean> {
   // Try Escape key first to dismiss any open modal
   document.dispatchEvent(
     new KeyboardEvent("keydown", {
@@ -706,7 +740,7 @@ export function discardApplication(): boolean {
       if (text.includes("save") && (text.includes("draft") || text.includes("application"))) {
         const discardBtn = findButtonByText(dialog, "discard", "delete", "don't save", "no")
         if (discardBtn) {
-          scrollAndClick(discardBtn)
+          await scrollAndClick(discardBtn, signal)
           return true
         }
       }
@@ -718,7 +752,7 @@ export function discardApplication(): boolean {
   if (text.includes("save") && (text.includes("draft") || text.includes("application"))) {
     const discardBtn = findButtonByText(saveModal, "discard", "delete", "don't save", "no")
     if (discardBtn) {
-      scrollAndClick(discardBtn)
+      await scrollAndClick(discardBtn, signal)
       return true
     }
   }
@@ -729,7 +763,7 @@ export function discardApplication(): boolean {
     "button.artdeco-modal__dismiss"
   )
   if (closeBtn) {
-    scrollAndClick(closeBtn)
+    await scrollAndClick(closeBtn, signal)
     return true
   }
 

@@ -260,10 +260,10 @@ export async function applyToJob(
  * Type a value into an input element with full React/SPA compatibility.
  * Dispatches focus, input, change, blur events after setting the native value.
  */
-function typeIntoInput(input: HTMLInputElement | HTMLTextAreaElement, value: string): void {
+async function typeIntoInput(input: HTMLInputElement | HTMLTextAreaElement, value: string): Promise<void> {
   input.focus()
   input.click()
-  setReactInputValue(input, value)
+  await setReactInputValue(input, value)
 }
 
 /**
@@ -278,7 +278,7 @@ function typeIntoInput(input: HTMLInputElement | HTMLTextAreaElement, value: str
  */
 async function submitSearch(input: Element, signal?: AbortSignal): Promise<boolean> {
   // 1. Dispatch Enter key events (may work on some LinkedIn layouts)
-  dispatchEnterKey(input)
+  await dispatchEnterKey(input)
 
   // 2. Also try to submit the parent form if it exists
   const form = input.closest("form")
@@ -308,9 +308,9 @@ async function submitSearch(input: Element, signal?: AbortSignal): Promise<boole
     return false
   }
 
-  // 5. Wait briefly and check if Enter + form submit navigated us to /jobs/
+  // 5. Wait with jitter and check if Enter + form submit navigated us to /jobs/
   try {
-    await delay(1500, signal)
+    await randomDelay(1000, 2500, signal)
     if (window.location.href.includes("/jobs/")) {
       return true
     }
@@ -338,7 +338,7 @@ async function submitSearch(input: Element, signal?: AbortSignal): Promise<boole
         const text = suggestion.textContent?.trim().toLowerCase() || ""
         // Look for any suggestion that mentions 'search' or 'jobs'
         if (text.includes("search") || text.includes("jobs")) {
-          scrollAndClick(suggestion)
+          await scrollAndClick(suggestion)
           // Wait for URL to change to /jobs/
           try {
             await waitForCondition(
@@ -496,7 +496,7 @@ async function searchViaGlobalBar(
       console.log("[SOS] LinkedIn: Saved resume state before page refresh")
     }
 
-    scrollAndClick(jobsBtn)
+    await scrollAndClick(jobsBtn)
   } else {
     console.log("[SOS] LinkedIn: 'Jobs' filter not found in typeahead — attempting fallback search strategies")
     const submitted = await submitSearch(input, signal)
@@ -612,6 +612,9 @@ async function searchViaUrlNavigation(
 
   // Use pushStateNavigate first (no page reload)
   pushStateNavigate(url)
+
+  // Human-like pause before checking for results to avoid anti-bot detection
+  await randomDelay(1000, 3000, signal)
 
   // Wait for results
   try {
@@ -815,9 +818,9 @@ export async function toggleInYourNetworkFilter(
     return false
   }
 
-  // Click to toggle
-  scrollAndClick(radio)
-  await delay(300, signal)
+  // Click to toggle with human-like pause
+  await scrollAndClick(radio)
+  await randomDelay(800, 2000, signal)
   console.log(`[SOS] LinkedIn: Toggled "In Your Network" ${enabled ? 'ON' : 'OFF'}`)
   return true
 }
@@ -844,8 +847,8 @@ export async function toggleUnder10ApplicantsFilter(
     return false
   }
 
-  scrollAndClick(toggle)
-  await delay(300, signal)
+  await scrollAndClick(toggle)
+  await randomDelay(800, 2000, signal)
   console.log(`[SOS] LinkedIn: Toggled "Under 10 Applicants" ${enabled ? 'ON' : 'OFF'}`)
   return true
 }
@@ -937,7 +940,7 @@ async function applyDomFilters(
     return result
   }
 
-  scrollAndClick(allFiltersBtn)
+  await scrollAndClick(allFiltersBtn)
 
   // Wait for filter modal to appear (MutationObserver-based)
   let modalContainer = await waitForElement(
@@ -948,7 +951,7 @@ async function applyDomFilters(
 
   if (!modalContainer) {
     console.log("[SOS] LinkedIn: Filter modal did not appear — retrying click")
-    scrollAndClick(allFiltersBtn)
+    await scrollAndClick(allFiltersBtn)
     modalContainer = await waitForElement(
       ".jobs-search-all-filters__content, div[data-test-all-filters-modal]",
       6_000,
@@ -970,7 +973,7 @@ async function applyDomFilters(
     findButtonByText(modalContainer, "show results", "apply")
 
   if (applyBtn) {
-    scrollAndClick(applyBtn)
+    await scrollAndClick(applyBtn)
     // Wait for results to update after applying DOM filters
     try {
       await waitForResults(8_000, signal)
@@ -1233,8 +1236,8 @@ async function scrollToNextJob(nextCard: HTMLElement, signal?: AbortSignal): Pro
     // Fallback: scroll the window
     nextCard.scrollIntoView({ behavior: "smooth", block: "center" })
   }
-  // Brief wait for scroll animation
-  await randomDelay(500, 1000, signal)
+  // Wait for scroll animation + human-like pause
+  await randomDelay(1500, 3000, signal)
 }
 
 /* ── Read job description ── */
@@ -1252,7 +1255,7 @@ export async function readJobDescription(
 
   // Click the job card to load its detail panel
   if (job.element) {
-    scrollAndClick(job.element)
+    await scrollAndClick(job.element)
   }
 
   // Wait for the detail panel to appear with content matching this job's title
@@ -1278,7 +1281,7 @@ export async function readJobDescription(
   const showMoreBtn = descriptionContent.querySelector<HTMLElement>(SHOW_MORE_BUTTON_SELECTOR)
   if (showMoreBtn) {
     const beforeLen = (descriptionContent.textContent || "").length
-    scrollAndClick(showMoreBtn)
+    await scrollAndClick(showMoreBtn)
 
     // Wait for description text to grow (mutation-based)
     try {
@@ -1330,13 +1333,13 @@ export async function testNavigateToSearchTerm(term: string): Promise<boolean> {
 
     input.focus()
     input.click()
-    setReactInputValue(input, "")
+    await setReactInputValue(input, "")
     console.log("[SOS TEST] PASS: Cleared search input")
 
-    setReactInputValue(input, term)
+    await setReactInputValue(input, term)
     console.log(`[SOS TEST] PASS: Set input value to "${term}"`)
 
-    dispatchEnterKey(input)
+    await dispatchEnterKey(input)
     console.log("[SOS TEST] PASS: Dispatched Enter key")
 
     console.log("[SOS TEST] ✓ navigateToSearchTerm works (results may take a moment)")

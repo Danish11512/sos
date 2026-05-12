@@ -98,7 +98,7 @@ async function createWidget(presetId: string): Promise<void> {
           pipelineActive = false
           // FIX F84: Ensure modal is discarded when pipeline stops for any reason
           try {
-            discardApplication()
+            await discardApplication()
           } catch (e) {
             console.warn("[SOS] Error discarding application in finally:", e)
           }
@@ -113,11 +113,11 @@ async function createWidget(presetId: string): Promise<void> {
 
   // Subscribe to stop-requested from widget (pause-stop, toggle while running)
   // FIX F84: Discard the application modal when stopping the pipeline
-  const unsubStop = eventBus.on("stop-requested", () => {
+  const unsubStop = eventBus.on("stop-requested", async () => {
     abortController?.abort()
     // Try to discard any open Easy Apply modal
     try {
-      discardApplication()
+      await discardApplication()
     } catch (e) {
       console.warn("[SOS] Error discarding application on stop:", e)
     }
@@ -171,7 +171,8 @@ async function createWidget(presetId: string): Promise<void> {
       const settings: AppSettings = await loadSettings()
       const site = settings.perSite?.[presetId] ?? null
       if (site && site.search.searchTerms.length > 0) {
-        // Use a small delay to let the page fully render
+        // Use a jittered delay to let page render + avoid anti-bot pattern
+        const resumeDelay = Math.floor(Math.random() * 3000) + 3000 // 3-6s
         setTimeout(async () => {
           abortController = new AbortController()
           widget?.setState("running")
@@ -195,13 +196,13 @@ async function createWidget(presetId: string): Promise<void> {
           } finally {
             await clearResumeState()
             try {
-              discardApplication()
+              await discardApplication()
             } catch (e) {
               console.warn("[SOS] Error discarding application in finally:", e)
             }
             abortController = null
           }
-        }, 2_000) // 2s delay to let LinkedIn's SPA render job results
+        }, resumeDelay) // jittered 3-6s delay to let LinkedIn's SPA render + avoid anti-bot pattern
       }
     }
   }
