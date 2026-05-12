@@ -157,11 +157,11 @@ export const SORT_MAP: Record<string, string> = {
 /** Filter URL param keys cleaned before rebuilding. */
 export const FILTER_URL_PARAMS = ["f_SB2", "f_TPR", "f_E", "f_JT", "f_WT", "f_AL", "f_CF"]
 
-/** Date posted param values for cycling. */
-export const DATE_POSTED_VALUES = ["r86400", "r604800", "r2592000"]
+/** Date posted text keys for cycling. These are looked up in DATE_POSTED_MAP and FILTER_OPTION_TEXT. */
+export const DATE_POSTED_VALUES = ["past 24 hours", "past week", "past month"]
 
-/** Sort param values for alternating. */
-export const SORT_VALUES = ["1", "2"]
+/** Sort text keys for alternating. These are looked up in SORT_MAP and FILTER_OPTION_TEXT. */
+export const SORT_VALUES = ["most recent", "most relevant"]
 
 /** Non-English "All filters" button selectors. */
 export const ALL_FILTERS_BUTTON_SELECTORS =
