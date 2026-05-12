@@ -25,13 +25,17 @@ import {
   waitForCondition,
   waitForElement,
 } from "../utils/dom"
+import { eventBus } from "../utils/event-bus"
 import {
+  APPLY_FORM_SELECTOR,
+  DEFAULT_TEXTAREA_RESPONSE,
   DETAIL_PANEL_CLOSE_SELECTOR,
   DETAIL_PANEL_OVERLAY_SELECTOR,
   DETAIL_PANEL_SELECTOR,
   LEARN_MORE_BUTTON_SELECTOR,
   MODAL_CLOSE_BUTTON_SELECTOR,
   STARTUP_RESULT_SELECTOR,
+  TYPING_WAIT_TIMEOUT_MS,
   USER_AVATAR_SELECTOR,
 } from "./wellfound-constants"
 
@@ -473,3 +477,210 @@ export function readAllWellfoundPreviews(): (JobPreview & {
   )
   return results
 }
+
+
+/* ── Application form filler ── */
+
+/**
+ * Try to find a human-readable label for a form field.
+ */
+function findFieldLabel(container: Element, field: Element): string {
+  const fieldId = field.getAttribute("id")
+  if (fieldId) {
+    const label = container.querySelector<HTMLElement>(`label[for="${fieldId}"]`)
+    if (label?.textContent?.trim()) return label.textContent.trim()
+  }
+  const ariaLabel = field.getAttribute("aria-label")
+  if (ariaLabel?.trim()) return ariaLabel.trim()
+  const prev = field.previousElementSibling
+  if (prev?.textContent?.trim()) {
+    const text = prev.textContent.trim()
+    if (text.length < 200) return text
+  }
+  return ""
+}
+
+/**
+ * Wait for the user to start typing in any form field within the given container.
+ */
+function waitForUserTyping(
+  container: Element,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const fields = container.querySelectorAll<HTMLElement>("textarea, input")
+
+    function onInput(): void { cleanup(); resolve(true) }
+    function onResume(): void { cleanup(); resolve(true) }
+    function onAbort(): void { cleanup(); resolve(false) }
+
+    let cleanupFns: (() => void)[] = []
+    function cleanup(): void {
+      cleanupFns.forEach((fn) => fn())
+      cleanupFns = []
+      clearTimeout(timeoutId)
+    }
+
+    fields.forEach((field) => {
+      field.addEventListener("input", onInput, { capture: true })
+      cleanupFns.push(() =>
+        field.removeEventListener("input", onInput, { capture: true }),
+      )
+    })
+
+    const unsubResume = eventBus.on("resume-requested", onResume)
+    cleanupFns.push(unsubResume)
+
+    if (signal) {
+      signal.addEventListener("abort", onAbort, { once: true })
+      cleanupFns.push(() => signal.removeEventListener("abort", onAbort))
+    }
+
+    const timeoutId = setTimeout(() => { cleanup(); resolve(false) }, timeoutMs)
+  })
+}
+
+/**
+ * Wait for the user to click Resume (or Stop) after a pause-for-help event.
+ */
+function waitForResume(signal?: AbortSignal): Promise<boolean> {
+  return new Promise((resolve) => {
+    let resolved = false
+    function onResume(): void {
+      if (resolved) return; resolved = true; cleanup(); resolve(true)
+    }
+    function onStop(): void {
+      if (resolved) return; resolved = true; cleanup(); resolve(false)
+    }
+    function onAbort(): void {
+      if (resolved) return; resolved = true; cleanup(); resolve(false)
+    }
+    function cleanup(): void {
+      eventBus.off("resume-requested", onResume)
+      eventBus.off("stop-requested", onStop)
+      if (signal) signal.removeEventListener("abort", onAbort)
+    }
+    eventBus.on("resume-requested", onResume)
+    eventBus.on("stop-requested", onStop)
+    if (signal) signal.addEventListener("abort", onAbort, { once: true })
+  })
+}
+
+/**
+ * Check for empty required fields in the Wellfound application form and pause
+ * for user input if any are found.
+ *
+ * 1. Finds all visible form fields (`textarea`, `input`) in the right-side form
+ *    section (`lg:w-2/5`).
+ * 2. Checks if ANY required fields are still empty. If so:
+ *    - Logs a warning
+ *    - Emits a `pause-for-help` event on the event bus
+ *    - Emits a `pipeline-progress` event asking the user to fill the fields
+ *    - Waits up to 20 seconds for the user to start typing (listens for `input`
+ *      events on the form fields)
+ *    - If the user starts typing within 20s, waits for a `resume-requested`
+ *      event before returning
+ *    - If 20s expires with no typing activity, returns `false`
+ * 3. Returns `true` if all required fields are filled, `false` if timed out.
+ *
+ * Each step is logged with a `[SOS] [Wellfound]` prefix.
+ *
+ * @param detailPanel - The `div[data-test="DiscoverModal"]` element containing the form
+ * @param signal      - Optional AbortSignal for cancellation
+ * @returns `true` if all required fields are filled, `false` if the user timed out
+ */
+export async function fillWellfoundApplicationForm(
+  detailPanel: Element,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  signal?.throwIfAborted()
+  console.log("[SOS] [Wellfound] Filling application form fields…")
+
+  /* ── Step 1: Find the right-side form section ── */
+  const formSection = detailPanel.querySelector<HTMLElement>(APPLY_FORM_SELECTOR)
+  if (!formSection) {
+    console.log("[SOS] [Wellfound] No form section found — nothing to check")
+    return true
+  }
+  console.log("[SOS] [Wellfound] Form section found")
+
+  /* ── Step 2: Find all visible textarea and input fields ── */
+  const allFields = formSection.querySelectorAll<HTMLTextAreaElement | HTMLInputElement>(
+    "textarea, input",
+  )
+  const visibleFields = Array.from(allFields).filter((el) => {
+    if (el instanceof HTMLInputElement && el.type === "hidden") return false
+    const style = window.getComputedStyle(el)
+    return style.display !== "none" && style.visibility !== "hidden" && el.offsetParent !== null
+  })
+
+  if (visibleFields.length === 0) {
+    console.log("[SOS] [Wellfound] No visible form fields found — nothing to check")
+    return true
+  }
+  console.log(`[SOS] [Wellfound] Found ${visibleFields.length} visible form field(s)`)
+
+  /* ── Step 3: Check if any required fields are still empty ── */
+  const emptyRequired = visibleFields.filter((field) => {
+    const value = field.value.trim()
+    const isRequired =
+      field.hasAttribute("required") ||
+      field.getAttribute("aria-required") === "true"
+    return isRequired && value === ""
+  })
+
+  if (emptyRequired.length === 0) {
+    console.log("[SOS] [Wellfound] All required fields are filled")
+    return true
+  }
+
+  /* ── Step 4: Required fields empty — pause for user input ── */
+  console.warn(
+    `[SOS] [Wellfound] ${emptyRequired.length} required field(s) still empty — waiting for user input`,
+  )
+
+  const emptyLabels = emptyRequired
+    .map((f) => findFieldLabel(formSection, f) || f.name || f.placeholder || "field")
+    .join(", ")
+  eventBus.emit("pause-for-help", {
+    siteId: "wellfound",
+    questionLabel: `Required fields: ${emptyLabels}`,
+    questionType: "text",
+  })
+  eventBus.emit("pipeline-progress", {
+    stage: "wellfound-application-form",
+    detail: `Please fill in the required field(s): ${emptyLabels} — then click Resume`,
+  })
+
+  /* ── Step 5: Wait up to 20s for the user to start typing ── */
+  const userStartedTyping = await waitForUserTyping(
+    formSection,
+    TYPING_WAIT_TIMEOUT_MS,
+    signal,
+  )
+
+  if (!userStartedTyping) {
+    console.warn(
+      "[SOS] [Wellfound] User did not start typing within 20s — returning false",
+    )
+    return false
+  }
+
+  /* ── Step 6: User started typing — wait for Resume button ── */
+  console.log(
+    "[SOS] [Wellfound] User started typing — waiting for Resume click",
+  )
+  const resumed = await waitForResume(signal)
+
+  if (!resumed) {
+    console.warn(
+      "[SOS] [Wellfound] User did not click Resume — returning false",
+    )
+    return false
+  }
+
+  console.log("[SOS] [Wellfound] Application form fields filled successfully")
+  return true
+}
+

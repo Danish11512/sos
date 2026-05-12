@@ -216,3 +216,13 @@ export const EMPTY_STATE_SELECTOR =
 
 /** Wellfound jobs search page URL. */
 export const WELLFOUND_JOBS_URL = "https://wellfound.com/jobs"
+
+
+/* ── Application form defaults ── */
+
+/** Default placeholder text for textarea fields on the Wellfound application form. */
+export const DEFAULT_TEXTAREA_RESPONSE =
+  "I am excited about this opportunity and believe my skills and experience align well with the role. I look forward to contributing to the team."
+
+/** Number of milliseconds to wait for the user to start typing before timing out. */
+export const TYPING_WAIT_TIMEOUT_MS = 20_000
