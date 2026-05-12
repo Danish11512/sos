@@ -18,6 +18,7 @@ import { isOnSearchResultsPage, applyPostNavFilters, captureJobs } from "../pipe
 
 
 import { runLinkedInPipeline, confirmJobListings } from "../pipeline/linkedin"
+import { runWellfoundPipeline } from "../pipeline/wellfound"
 
 import { discardApplication } from "../utils/dom"
 
@@ -97,6 +98,32 @@ async function createWidget(presetId: string): Promise<void> {
         } finally {
           pipelineActive = false
           // FIX F84: Ensure modal is discarded when pipeline stops for any reason
+          try {
+            await discardApplication()
+          } catch (e) {
+            console.warn("[SOS] Error discarding application in finally:", e)
+          }
+          abortController = null
+        }
+
+      } else if (presetId === "wellfound") {
+        abortController = new AbortController()
+        pipelineActive = true
+        widget?.setState("running")
+        try {
+          await runWellfoundPipeline(abortController.signal, (msg) => {
+            widget?.setProgress(msg)
+          })
+          widget?.setDone()
+        } catch (err: unknown) {
+          if (err instanceof Error && err.name === "AbortError") {
+            widget?.setStopped()
+          } else {
+            const msg = err instanceof Error ? err.message : String(err)
+            widget?.setError(msg)
+          }
+        } finally {
+          pipelineActive = false
           try {
             await discardApplication()
           } catch (e) {

@@ -16,14 +16,9 @@ export default defineBackground(() => {
     if (!matched) return
 
     const urlLower = url.toLowerCase()
-    const isSearchPage =
-      matched.id === "linkedin"
-        ? urlLower.includes("/jobs/search/") || urlLower.includes("/jobs/search-results/")
-        : matched.id === "indeed"
-          ? urlLower.includes("/jobs") && urlObj.searchParams.has("q")
-          : matched.id === "wellfound"
-            ? urlLower.includes("/jobs")
-            : false
+    const matchesPattern = matched.searchResultPatterns.some((p) => urlLower.includes(p))
+    const hasSearchQuery = matched.requiresSearchQuery ? urlObj.searchParams.has("q") : true
+    const isSearchPage = matchesPattern && hasSearchQuery
 
     if (!isSearchPage) return
 

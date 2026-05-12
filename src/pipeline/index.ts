@@ -17,6 +17,7 @@ import { loadSettings } from "../utils/storage"
 import { eventBus } from "../utils/event-bus"
 import { applyIndeedExtraFilters } from "./indeed"
 import type { ApplyFiltersResult, ScrapeJobResult, PipelineError } from "./types"
+import { sitePresets } from "../config/sites"
 
 export type { ApplyFiltersResult, ScrapeJobResult, PipelineError }
 
@@ -166,16 +167,11 @@ export async function applyPostNavFilters(siteId: string): Promise<ApplyFiltersR
 
 export function isOnSearchResultsPage(siteId: string): boolean {
   const url = window.location.href.toLowerCase()
-  switch (siteId) {
-    case "linkedin":
-      return url.includes("/jobs/search/") || url.includes("/jobs/search-results/")
-    case "indeed":
-      return url.includes("/jobs") && url.includes("?q=")
-    case "wellfound":
-      return url.includes("/jobs")
-    default:
-      return false
-  }
+  const preset = sitePresets.find((p) => p.id === siteId)
+  if (!preset) return false
+  const matchesPattern = preset.searchResultPatterns.some((p) => url.includes(p))
+  const hasSearchQuery = preset.requiresSearchQuery ? url.includes("?q=") : true
+  return matchesPattern && hasSearchQuery
 }
 
 /* ── Job capture (for site pipelines that use it) ── */
