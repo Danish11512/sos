@@ -143,8 +143,8 @@ export function checkCompanyList(company: string, companies: string[]): boolean 
 
 export function extractSalary(description: string): number {
   const descLower = description.toLowerCase()
-  const rangeYearRe = /\$(\d{1,3}(?:,\d{3})?)\s*[-–to]+\s*\$(\d{1,3}(?:,\d{3})?)\s*(?:per\s+year|annually|annual|per\s+annum|\/year|\/yr)/gi
-  const rangeKRe = /\$(\d+)\s*k\s*[-–to]+\s*\$(\d+)\s*k/gi
+  const rangeYearRe = /\$(\d{1,3}(?:,\d{3})?)\s*[-to]+\s*\$(\d{1,3}(?:,\d{3})?)\s*(?:per\s+year|annually|annual|per\s+annum|\/year|\/yr)/gi
+  const rangeKRe = /\$(\d+)\s*k\s*[-to]+\s*\$(\d+)\s*k/gi
   const singleYearRe = /\$(\d{1,3}(?:,\d{3})?)\s*(?:per\s+year|annually|annual|per\s+annum|\/year|\/yr)/gi
   const singleKRe = /\$(\d+)\s*k/gi
   let maxSalary = 0
