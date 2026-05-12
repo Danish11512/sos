@@ -101,6 +101,9 @@ export async function runWellfoundPipeline(
 
   /* ── Phase 3: Iterate through each job ── */
   const total = jobs.length
+  let appliedCount = 0
+  let skippedCount = 0
+  let errorCount = 0
 
   for (let i = 0; i < total; i++) {
     signal.throwIfAborted()
@@ -108,41 +111,54 @@ export async function runWellfoundPipeline(
     const job = jobs[i]
     const indexStr = `${i + 1}/${total}`
 
-    /* Step 1: Progress callback with job title */
-    onProgress?.(`[${indexStr}] ${job.title} @ ${job.company}`)
+    /* ── Check badge: skip external (no Wellfound badge) jobs ── */
+    if (!job.hasWellfoundBadge) {
+      console.log(
+        `[SOS] [Wellfound] [${indexStr}] Skipped (external): ${job.title} @ ${job.company}`,
+      )
+      skippedCount++
+      onProgress?.(
+        `[${indexStr}] Skipped (external): ${job.title} @ ${job.company}`,
+      )
+      continue
+    }
 
-    /* Step 2: Open the job detail panel (WF-6) */
+    /* ── Native-apply badge present — proceed with opening details ── */
+    console.log(
+      `[SOS] [Wellfound] [${indexStr}] Applying (native): ${job.title} @ ${job.company}`,
+    )
+    appliedCount++
+    onProgress?.(
+      `[${indexStr}] Applying (native): ${job.title} @ ${job.company}`,
+    )
+
+    /* Step 1: Open the job detail panel (WF-6) */
     const modal = await openWellfoundJobDetails(job, signal)
 
-    /* Step 3: Log detail panel opened */
+    /* Step 2: Log detail panel opened */
     if (modal) {
       console.log(
         `[SOS] [Wellfound] [${indexStr}] Detail panel opened for ${job.title} @ ${job.company}`,
       )
     } else {
       console.warn(
-        `[SOS] [Wellfound] [${indexStr}] Detail panel failed to open for ${job.title} @ ${job.company} — skipping`,
+        `[SOS] [Wellfound] [${indexStr}] Detail panel failed to open for ${job.title} @ ${job.company} — error`,
       )
+      errorCount++
       continue
     }
 
     signal.throwIfAborted()
 
-    /* Step 4 & 5: Check native-apply badge and log apply type */
-    const applyType = job.hasWellfoundBadge ? "native" : "external"
-    console.log(
-      `[SOS] [Wellfound] [${indexStr}] Apply type: ${applyType}`,
-    )
-
-    /* Step 6: Visual feedback delay */
+    /* Step 3: Visual feedback delay */
     await randomDelay(1000, 2000, signal)
 
     signal.throwIfAborted()
 
-    /* Step 7: Close the detail panel (WF-7) */
+    /* Step 4: Close the detail panel (WF-7) */
     const closed = await closeWellfoundDetailPanel(modal, signal)
 
-    /* Step 8: Log panel closed */
+    /* Step 5: Log panel closed */
     if (closed) {
       console.log(
         `[SOS] [Wellfound] [${indexStr}] Detail panel closed for ${job.title} @ ${job.company}`,
@@ -151,13 +167,18 @@ export async function runWellfoundPipeline(
       console.warn(
         `[SOS] [Wellfound] [${indexStr}] Detail panel may not have closed cleanly for ${job.title} @ ${job.company}`,
       )
+      errorCount++
     }
   }
 
   /* ── Phase 3 done ── */
   signal.throwIfAborted()
-  console.log("[SOS] [Wellfound] ✅ Pipeline complete (Phase 3 — Phase 4 will add the actual apply flow)")
-  onProgress?.("Pipeline complete")
+  console.log(
+    `[SOS] [Wellfound] Pipeline complete: ${appliedCount} applied, ${skippedCount} skipped (external), ${errorCount} errors out of ${total} total.`,
+  )
+  onProgress?.(
+    `Pipeline complete: ${appliedCount} applied, ${skippedCount} skipped, ${errorCount} errors out of ${total} total.`,
+  )
 }
 
 
