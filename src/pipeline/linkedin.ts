@@ -337,46 +337,94 @@ async function searchViaGlobalBar(
   // Clear and type the term
   typeIntoInput(input, term)
 
-  // Wait for the typeahead dropdown to appear with the "Jobs" filter option
-  await delay(800, signal)
-
-  // Find and click the "Jobs" filter button in the typeahead dropdown
-  // This navigates to the jobs search results page with the keywords
-  // Current LinkedIn CSS-module design: div[role='button'][tabindex='0'] with checkbox-style toggles
-  // Old design: a[role='radio'] links
-  let jobsBtn = document.querySelector<HTMLElement>(
-    /* Current design: div[role='button'] with aria-label containing 'Jobs' */
-    "div[role='button'][tabindex='0']:has(div[aria-label*='Filter by Jobs']), " +
-    "div[role='button'][tabindex='0']:has(div[aria-label*='Jobs']), " +
-    /* Legacy designs */
-    "a[role='radio'][aria-label*='Filter by Jobs'], " +
-    "a[role='radio'][aria-label*='Jobs']"
-  )
-
-  // Second try: search by text content among all radio buttons or div toggles in the typeahead
-  if (!jobsBtn) {
-    jobsBtn = Array.from(document.querySelectorAll<HTMLElement>(
-      "a[role='radio'], " +
-      "div[role='button'][tabindex='0']"
-    )).find(
-      (el) => el.textContent?.trim().toLowerCase() === "jobs" ||
-              el.getAttribute("aria-label")?.toLowerCase().includes("jobs")
-    ) || null
+  // Wait for the typeahead dropdown to appear (MutationObserver-based, no fixed delay)
+  // The dropdown appears as a positioned panel below the search bar after typing
+  let typeaheadDropdown: Element | null = null
+  try {
+    // Scope the search to the nav/header area where the global search bar lives
+    const navContainer = input.closest("nav, header, #global-nav-search, form")
+    await waitForCondition(
+      () => {
+        if (!navContainer) return false
+        // The typeahead dropdown may be inside the nav or as a sibling
+        return (
+          navContainer.querySelector(
+            "div[role='listbox'], " +
+            "[data-test-typeahead], " +
+            ".search-global-typeahead__typeahead"
+          ) !== null ||
+          (navContainer.parentElement?.querySelector(
+            "div[role='listbox'], " +
+            "[data-test-typeahead], " +
+            ".search-global-typeahead__typeahead"
+          ) ?? null) !== null
+        )
+      },
+      { timeoutMs: 3_000, signal, pollIntervalMs: 100 }
+    )
+    // Found — resolve the dropdown element
+    typeaheadDropdown =
+      navContainer?.querySelector(
+        "div[role='listbox'], " +
+        "[data-test-typeahead], " +
+        ".search-global-typeahead__typeahead"
+      ) ??
+      navContainer?.parentElement?.querySelector(
+        "div[role='listbox'], " +
+        "[data-test-typeahead], " +
+        ".search-global-typeahead__typeahead"
+      ) ??
+      null
+  } catch {
+    // No dropdown appeared (e.g., already on a jobs search results page,
+    // or LinkedIn's SPA didn't render the typeahead)
+    console.log("[SOS] LinkedIn: Typeahead dropdown did not appear — returning false")
+    return false
   }
 
-  // Third try: look for any filter button inside the typeahead dropdown
-  if (!jobsBtn) {
-    const typeaheadDropdown = document.querySelector(
-      "[data-test-typeahead], " +
-      ".search-global-typeahead__typeahead, " +
-      "div[role='listbox']"
+  // Find the "Jobs" filter button WITHIN the typeahead dropdown
+  // Strategy: look for any clickable element whose inner content/text indicates "Jobs"
+  let jobsBtn: HTMLElement | null = null
+
+  if (typeaheadDropdown) {
+    // Find the element within the dropdown whose text/label mentions "Jobs"
+    const allCandidates = typeaheadDropdown.querySelectorAll<HTMLElement>(
+      "div[role='button'], " +
+      "a[role='radio'], " +
+      "a[aria-label*='Jobs'], " +
+      "a[aria-label*='jobs'], " +
+      "div[role='button'][tabindex='0']"
     )
-    if (typeaheadDropdown) {
-      jobsBtn = typeaheadDropdown.querySelector<HTMLElement>(
-        "div[role='button'][tabindex='0'], " +
-        "a[role='radio'], " +
-        "a[aria-label*='Jobs']"
+
+    for (const candidate of Array.from(allCandidates)) {
+      const text = candidate.textContent?.toLowerCase() || ""
+      const label = candidate.getAttribute("aria-label")?.toLowerCase() || ""
+      // Use includes() instead of === because the outer button contains
+      // nested SVG icons, hidden text, and whitespace
+      if (text.includes("jobs") || label.includes("jobs")) {
+        jobsBtn = candidate
+        break
+      }
+    }
+
+    // Fallback: check any descendant element with "Jobs" text
+    if (!jobsBtn) {
+      const jobsLabel = typeaheadDropdown.querySelector<HTMLElement>(
+        "[aria-label*='Jobs'], " +
+        "[aria-label*='jobs'], " +
+        "span:not([aria-hidden]), div:not([role='button'])"
       )
+      if (jobsLabel) {
+        const labelText = jobsLabel.textContent?.toLowerCase() || ""
+        const labelAttr = jobsLabel.getAttribute("aria-label")?.toLowerCase() || ""
+        if (labelText.includes("jobs") || labelAttr.includes("jobs")) {
+          // Walk up to find the clickable ancestor
+          const clickable = jobsLabel.closest<HTMLElement>(
+            "div[role='button'], a[role='radio']"
+          )
+          if (clickable) jobsBtn = clickable
+        }
+      }
     }
   }
 
