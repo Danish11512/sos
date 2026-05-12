@@ -658,16 +658,15 @@ export async function navigateToSearchTerm(
 ): Promise<void> {
   console.log(`[SOS] LinkedIn: Navigating to search term "${term}"`)
 
-  // Guard: If already on a LinkedIn jobs search results page, skip the global bar
-  // approach entirely to avoid a FULL PAGE REFRESH loop. Clicking the "Jobs" radio
-  // button in the global bar typeahead triggers a page reload, which re-runs the
-  // pipeline, which calls navigateToSearchTerm again → infinite loop.
+  // Guard: If already on a LinkedIn jobs search results page, update keywords via pushState.
+  // Checks both /jobs/search-results/ (current) and /jobs/search/ (legacy) patterns.
   const currentUrl = window.location.href.toLowerCase()
-  const onJobsSearchResults = currentUrl.includes("/jobs/search/") ||
+  const isOnSearchResults = currentUrl.includes("/jobs/search-results/") ||
+    currentUrl.includes("/jobs/search/") ||
     (currentUrl.includes("/jobs/") && currentUrl.includes("keywords="))
 
-  if (onJobsSearchResults) {
-    console.log("[SOS] LinkedIn: Already on jobs search results page — updating keyword param via pushState")
+  if (isOnSearchResults) {
+    console.log("[SOS] LinkedIn: Already on search results page — updating keyword param via pushState")
     try {
       const url = new URL(window.location.href)
       url.searchParams.set("keywords", term)
@@ -675,24 +674,32 @@ export async function navigateToSearchTerm(
       await waitForResults(10_000, signal)
       return
     } catch (err) {
-      console.warn("[SOS] LinkedIn: URL param update failed — falling back to search strategies", err)
+      console.warn("[SOS] LinkedIn: pushState update failed", err)
     }
   }
 
-  // Strategy 1: Global search bar (works from ANY LinkedIn page)
-  const globalResult = await searchViaGlobalBar(term, signal, site, termIdx)
-  if (globalResult) return
+  // PRIMARY NAVIGATION: Navigate directly to the jobs search results URL.
+  // This bypasses LinkedIn's finicky global search typeahead and "Jobs" filter button,
+  // which change frequently with LinkedIn's CSS-module redesigns.
+  // Uses pushStateNavigate first (SPA, no page reload), falls back to full page load.
+  console.log("[SOS] LinkedIn: Navigating directly to search results URL")
+  const searchUrl = "https://www.linkedin.com/jobs/search-results/"
+  const url = new URL(searchUrl)
+  url.searchParams.set("keywords", term)
+  url.searchParams.set("sos_nav", "1")
+  pushStateNavigate(url)
 
-  // Strategy 2: Semantic search bar (AI-powered, on jobs pages)
-  const semanticResult = await searchViaSemanticBar(term, signal)
-  if (semanticResult) return
+  try {
+    await waitForResults(15_000, signal)
+    console.log("[SOS] LinkedIn: URL navigation returned results")
+    return
+  } catch {
+    console.log("[SOS] LinkedIn: pushState failed — doing full page load")
+  }
 
-  // Strategy 3: Jobs-specific search bar (on /jobs/ pages)
-  const jobsResult = await searchViaJobsBar(term, signal)
-  if (jobsResult) return
-
-  // Strategy 4: URL navigation (always works)
-  await searchViaUrlNavigation(term, signal)
+  // Last resort: full page navigation
+  window.location.href = `${searchUrl}?keywords=${encodeURIComponent(term)}`
+  throw new Error(`Navigating to jobs search page for "${term}" — page will reload`)
 }
 
 /* ── Navigation: Filters (DOM-based dropdown interaction) ── */
@@ -1498,6 +1505,68 @@ export async function readJobDescription(
 }
 
 /* ── Test functions for each pipeline step ── */
+
+/**
+ * Confirmation function: check if job listings are present on the current page.
+ * Call from browser console to verify the pipeline has successfully navigated:
+ *   confirmJobListings()
+ *
+ * Reports:
+ *   - Number of job cards found
+ *   - URL of the current page
+ *   - Whether the search results filter bar is visible
+ *   - Example titles/companies of first 3 jobs
+ */
+export async function confirmJobListings(): Promise<boolean> {
+  console.log("═══════════════════════════════════════════")
+  console.log("[SOS] Confirming job listings...")
+  console.log("═══════════════════════════════════════════")
+
+  // 1. Check current URL
+  const currentUrl = window.location.href
+  const isOnJobsPage = currentUrl.includes("/jobs/")
+  console.log(`URL: ${currentUrl}`)
+  console.log(`On jobs page: ${isOnJobsPage}`)
+
+  // 2. Count job cards using CARD_SELECTOR
+  const cards = document.querySelectorAll(CARD_SELECTOR)
+  console.log(`Job cards found: ${cards.length} (using CARD_SELECTOR)`)
+
+  if (cards.length > 0) {
+    // 3. Show first 3 job details
+    console.log(`\n── First ${Math.min(3, cards.length)} job(s) ──`)
+    for (let i = 0; i < Math.min(3, cards.length); i++) {
+      const card = cards[i] as HTMLElement
+      const title = extractCardTitle(card)
+      const company = extractCardCompany(card)
+      const location = extractCardLocation(card)
+      console.log(`  ${i + 1}. "${title}" @ "${company}" (${location})`)
+    }
+  }
+
+  // 4. Check search results filter bar
+  const filterBar = document.querySelector(SEARCH_RESULTS_FILTER_BAR)
+  console.log(`Filter bar visible: ${filterBar !== null}`)
+
+  // 5. Check empty state
+  const emptyState = document.querySelector(EMPTY_STATE_SELECTOR)
+  console.log(`Empty state visible: ${emptyState !== null}`)
+
+  // 6. Summary
+  const hasCards = cards.length > 0
+  if (hasCards) {
+    console.log("\n✅ CONFIRMED: Job listings are present!")
+  } else if (emptyState) {
+    console.log("\n⚠️  Page loaded but no jobs found (empty state)")
+  } else if (isOnJobsPage) {
+    console.log("\n⏳ On jobs page but waiting for results to load...")
+  } else {
+    console.log("\n❌ NOT on a jobs search results page")
+  }
+
+  console.log("═══════════════════════════════════════════")
+  return hasCards
+}
 
 /**
  * Test: navigateToSearchTerm
