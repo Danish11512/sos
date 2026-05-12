@@ -20,6 +20,7 @@ import type { JobPreview } from "./types"
 import {
   delay,
   dispatchEscapeKey,
+  findButtonByText,
   randomDelay,
   scrollAndClick,
   waitForCondition,
@@ -32,12 +33,29 @@ import {
   DETAIL_PANEL_CLOSE_SELECTOR,
   DETAIL_PANEL_OVERLAY_SELECTOR,
   DETAIL_PANEL_SELECTOR,
+  DISABLED_BUTTON_SELECTOR,
+  FORM_FIELD_SELECTOR,
   LEARN_MORE_BUTTON_SELECTOR,
   MODAL_CLOSE_BUTTON_SELECTOR,
+  REQUIRED_FIELD_SELECTOR,
   STARTUP_RESULT_SELECTOR,
+  SUBMIT_BUTTON_SELECTOR,
+  SUCCESS_BANNER_SELECTOR,
   TYPING_WAIT_TIMEOUT_MS,
   USER_AVATAR_SELECTOR,
 } from "./wellfound-constants"
+
+
+/* ── Constants ── */
+
+/** How long to wait for the user to fill required fields before timing out (5 minutes). */
+const WAIT_FOR_USER_TIMEOUT = 300_000
+
+/** Short wait after clicking submit to see if it goes through before checking for required fields. */
+const SHORT_SUBMIT_WAIT = 2_000
+
+/** Full timeout for waiting for submission confirmation. */
+const SUBMIT_CONFIRMATION_TIMEOUT = 8_000
 
 /* ── Login check ── */
 
@@ -382,6 +400,250 @@ export async function closeWellfoundDetailPanel(
   /* ── All strategies exhausted ── */
   console.log("[SOS] [Wellfound] Failed to close detail panel — all strategies exhausted")
   return false
+}
+
+
+/* ── Already-applied check ── */
+
+/**
+ * Check if a job card already has an application submitted.
+ * Looks for a disabled button containing "Applied" or "✓" text.
+ * This is used BEFORE opening the detail panel to skip already-applied jobs.
+ *
+ * @param jobCard - The job card HTMLElement to check
+ * @returns `true` if the job has already been applied to, `false` otherwise
+ */
+export function isWellfoundAlreadyApplied(jobCard: HTMLElement): boolean {
+  const disabledBtn = jobCard.querySelector<HTMLElement>(DISABLED_BUTTON_SELECTOR)
+  if (!disabledBtn) return false
+
+  const text = disabledBtn.textContent?.trim().toLowerCase() || ""
+  const isApplied =
+    text.includes("applied") || text.includes("✓")
+
+  if (isApplied) {
+    console.log(
+      "[SOS] [Wellfound] Job already applied (disabled button with 'Applied'/'✓') — skipping",
+    )
+  }
+
+  return isApplied
+}
+
+
+/* ── Helpers: submission check, required-field detection, user-wait ── */
+
+/**
+ * Check whether the application was successfully submitted.
+ * Returns `true` if:
+ *   - A green success banner (`div.bg-green-600`) containing "Congrats!" is visible, OR
+ *   - The detail modal (`div[data-test="DiscoverModal"]`) has been removed from the DOM.
+ */
+function isSubmissionSuccessful(): boolean {
+  const successBanner = document.querySelector<HTMLElement>(
+    SUCCESS_BANNER_SELECTOR,
+  )
+  if (successBanner && successBanner.textContent?.includes("Congrats")) {
+    return true
+  }
+
+  if (!document.querySelector(DETAIL_PANEL_SELECTOR)) {
+    return true
+  }
+
+  return false
+}
+
+
+/**
+ * Check whether the Wellfound apply form has required fields that need user input.
+ * Uses two strategies:
+ *   1. Looks for HTML5 `[required]` or ARIA `[aria-required="true"]` attributes
+ *      on input, textarea, and select elements in the detail panel.
+ *   2. Checks for any visible, empty form fields (input, textarea, select)
+ *      in the right-side apply form area (`div[class*="lg:w-2/5"]`).
+ *
+ * @param detailPanel - The `div[data-test="DiscoverModal"]` element
+ * @returns `true` if the form has required or empty fields needing user attention
+ */
+function hasRequiredFields(detailPanel: Element): boolean {
+  /* Strategy 1: HTML5 required or ARIA required attributes */
+  const requiredAttrs = detailPanel.querySelectorAll<HTMLElement>(
+    REQUIRED_FIELD_SELECTOR,
+  )
+  if (requiredAttrs.length > 0) {
+    console.log(
+      `[SOS] [Wellfound] Detected ${requiredAttrs.length} field(s) with required attribute`,
+    )
+    return true
+  }
+
+  /* Strategy 2: Empty visible form fields in the apply form area */
+  const formFields = detailPanel.querySelectorAll<
+    HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+  >(FORM_FIELD_SELECTOR)
+
+  let emptyCount = 0
+  for (const field of formFields) {
+    if (!field.value || field.value.trim() === "") {
+      emptyCount++
+    }
+  }
+
+  if (emptyCount > 0) {
+    console.log(
+      `[SOS] [Wellfound] Detected ${emptyCount} empty form field(s) that may need input`,
+    )
+    return true
+  }
+
+  return false
+}
+
+
+/**
+ * Abstracted user-awaiting logic — pauses pipeline and waits for user input.
+ *
+ * Emits a `pause-for-help` event (transitions widget to "paused" state with a
+ * message), then waits for the user to click **Resume** (returns `true`) or
+ * **Stop** / abort (returns `false`).
+ *
+ * ⚠️ Only call this AFTER confirming required fields exist via `hasRequiredFields()`.
+ *
+ * @param signal - Optional AbortSignal for cancellation
+ * @returns `true` if the user clicked Resume, `false` if stopped or timed out
+ */
+async function waitForUserInput(
+  signal?: AbortSignal,
+): Promise<boolean> {
+  console.log(
+    "[SOS] [Wellfound] ⛔ Required fields detected — pausing pipeline for user input",
+  )
+
+  eventBus.emit("pause-for-help", {
+    siteId: "wellfound",
+    questionLabel: "form fields",
+    questionType: "text",
+  })
+
+  return new Promise<boolean>((resolve) => {
+    const onResume = () => { cleanup(); resolve(true) }
+    const onStop = () => { cleanup(); resolve(false) }
+
+    function cleanup(): void {
+      eventBus.off("resume-requested", onResume)
+      eventBus.off("stop-requested", onStop)
+      if (signal) signal.removeEventListener("abort", onAbort)
+      clearTimeout(timeoutId)
+    }
+
+    function onAbort(): void { cleanup(); resolve(false) }
+
+    eventBus.on("resume-requested", onResume)
+    eventBus.on("stop-requested", onStop)
+    if (signal) { signal.addEventListener("abort", onAbort, { once: true }) }
+
+    const timeoutId = setTimeout(() => {
+      cleanup()
+      console.warn("[SOS] [Wellfound] waitForUserInput timed out after 5 min — treating as stop")
+      resolve(false)
+    }, WAIT_FOR_USER_TIMEOUT)
+  })
+}
+
+
+/* ── Submit application ── */
+
+/**
+ * Submit a Wellfound application. Clicks submit, checks for required fields,
+ * waits for user if needed, confirms success.
+ *
+ * Flow:
+ * 1. Find submit button (multi-strategy)
+ * 2. Click it via `scrollAndClick`
+ * 3. Wait briefly (2s) to see if submission goes through
+ * 4. If NOT confirmed, check for required/empty fields
+ * 5. If required fields → `waitForUserInput()` to pause, then retry submit
+ * 6. Wait for final confirmation (up to 8s)
+ * 7. On success → log ✓ and return `true`
+ * 8. On timeout → log warning, call `closeWellfoundDetailPanel`, return `false`
+ *
+ * @param detailPanel - The `div[data-test="DiscoverModal"]` element
+ * @param signal      - Optional AbortSignal for cancellation
+ * @returns `true` if the application was submitted successfully
+ */
+export async function submitWellfoundApplication(
+  detailPanel: Element,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  signal?.throwIfAborted()
+  console.log("[SOS] [Wellfound] Submitting application...")
+
+  /* ── Step 1: Find the submit button ── */
+  let submitBtn = detailPanel.querySelector<HTMLElement>(
+    // Primary: data-test attribute from observed DOM
+    // (DETAIL_APPLY_BUTTON_SELECTOR also covers this but includes Playwright-only
+    // pseudo-classes, so we query the specific selectors directly)
+    'button[data-test="JobDescriptionSlideIn--SubmitButton"]',
+  )
+  if (!submitBtn) {
+    // Fallback: type="submit" button
+    submitBtn = detailPanel.querySelector<HTMLElement>('button[type="submit"]')
+  }
+  if (!submitBtn) {
+    // Fallback: text-based match
+    submitBtn = findButtonByText(detailPanel, "apply", "submit", "send") as HTMLElement | null
+  }
+  if (!submitBtn) {
+    console.warn("[SOS] [Wellfound] Submit button not found — cannot submit")
+    return false
+  }
+
+  console.log("[SOS] [Wellfound] Found submit button, clicking...")
+  await scrollAndClick(submitBtn, signal)
+
+  /* ── Step 3: Wait briefly to see if submission went through ── */
+  console.log("[SOS] [Wellfound] Waiting briefly (2s) to check if submission went through...")
+  try {
+    await waitForCondition(isSubmissionSuccessful, {
+      timeoutMs: SHORT_SUBMIT_WAIT,
+      signal,
+      pollIntervalMs: 200,
+    })
+    console.log("[SOS] [Wellfound] Application submitted successfully!")
+    return true
+  } catch {
+    console.log("[SOS] [Wellfound] Submission not immediately confirmed — checking for required fields...")
+  }
+
+  /* ── Step 4: Check for required fields ── */
+  if (hasRequiredFields(detailPanel)) {
+    console.log("[SOS] [Wellfound] Required fields detected — waiting for user input")
+    const userResumed = await waitForUserInput(signal)
+    if (!userResumed) {
+      console.warn("[SOS] [Wellfound] User stopped or timed out while waiting for required fields")
+      await closeWellfoundDetailPanel(detailPanel, signal)
+      return false
+    }
+    console.log("[SOS] [Wellfound] User resumed — retrying submit...")
+    await scrollAndClick(submitBtn, signal)
+  }
+
+  /* ── Step 5: Wait for final success confirmation (up to 8s) ── */
+  console.log("[SOS] [Wellfound] Waiting for application confirmation (up to 8s)...")
+  try {
+    await waitForCondition(isSubmissionSuccessful, {
+      timeoutMs: SUBMIT_CONFIRMATION_TIMEOUT,
+      signal,
+      pollIntervalMs: 200,
+    })
+    console.log("[SOS] [Wellfound] Application submitted successfully!")
+    return true
+  } catch {
+    console.warn("[SOS] [Wellfound] Timeout waiting for application confirmation — closing detail panel")
+    await closeWellfoundDetailPanel(detailPanel, signal)
+    return false
+  }
 }
 
 

@@ -212,6 +212,30 @@ export const EMPTY_STATE_SELECTOR =
   `[class*="no-results"], ` +
   `[class*="empty-state"]`
 
+/* ── Submission & confirmation selectors ── */
+
+/** Selector for the green success banner after a successful application.
+ *  Observed: `div.bg-green-600` containing "Congrats! Your application has been submitted." */
+export const SUCCESS_BANNER_SELECTOR = `div.bg-green-600`
+
+/** Selector for a disabled button on a job card, indicating already-applied status.
+ *  Observed: `button[disabled]` with text "Applied" or containing "✓". */
+export const DISABLED_BUTTON_SELECTOR = `button[disabled]`
+
+/** Selector for form elements with a required constraint.
+ *  Covers HTML5 `required` attribute and ARIA `aria-required="true"`. */
+export const REQUIRED_FIELD_SELECTOR =
+  `input[required], textarea[required], select[required], ` +
+  `[aria-required="true"]`
+
+/** Selector for visible (non-hidden, non-submit, non-button) form fields
+ *  in the right-side apply form area of the detail panel.
+ *  Observed: the right 2/5 panel uses `lg:w-2/5`. */
+export const FORM_FIELD_SELECTOR =
+  `div[class*="lg:w-2/5"] input:not([type="hidden"]):not([type="submit"]):not([type="button"]), ` +
+  `div[class*="lg:w-2/5"] textarea, ` +
+  `div[class*="lg:w-2/5"] select`
+
 /* ── Navigation ── */
 
 /** Wellfound jobs search page URL. */
